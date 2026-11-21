@@ -19,6 +19,18 @@ const statsSchema = z.object({
   costSaved: z.number().optional(),
   costSavingsPct: z.number().optional(),
   fetchedAt: z.string().optional(),
+  sessions: z
+    .array(
+      z.object({
+        id: z.string(),
+        requests: z.number().optional(),
+        tokensSaved: z.number().optional(),
+        costSaved: z.number().optional(),
+        savingsPct: z.number().optional(),
+        lastActivityAt: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export type HeadroomStats = z.infer<typeof statsSchema>;

@@ -1,7 +1,52 @@
+import { z } from "zod";
 import type { HeadroomStats } from "../shared/headroom";
 
 // Uses the same env var as the headroom CLI; default matches `headroom proxy`.
 const port = process.env.HEADROOM_PORT ?? "8787";
+
+const statsPayload = z.object({
+  summary: z
+    .object({
+      api_requests: z.number().optional(),
+      primary_model: z.string().optional(),
+      compression: z
+        .object({
+          requests_compressed: z.number().optional(),
+          avg_compression_pct: z.number().optional(),
+          best_compression_pct: z.number().optional(),
+          best_detail: z.string().optional(),
+          total_tokens_removed: z.number().optional(),
+          total_tokens_before: z.number().optional(),
+        })
+        .optional(),
+      uncompressed_requests: z.object({ prefix_frozen: z.number().optional() }).optional(),
+      cost: z
+        .object({
+          with_headroom_usd: z.number().optional(),
+          without_headroom_usd: z.number().optional(),
+          total_saved_usd: z.number().optional(),
+          savings_pct: z.number().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  savings: z
+    .object({
+      per_project: z
+        .record(
+          z.string(),
+          z.object({
+            requests: z.number().optional(),
+            tokens_saved: z.number().optional(),
+            compression_savings_usd: z.number().optional(),
+            savings_percent: z.number().optional(),
+            last_activity_at: z.string().optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+});
 
 export async function getHeadroomStats(): Promise<HeadroomStats> {
   const ac = new AbortController();
@@ -11,28 +56,19 @@ export async function getHeadroomStats(): Promise<HeadroomStats> {
       signal: ac.signal,
     });
     if (!res.ok) return { live: false, error: `proxy HTTP ${res.status}`, port };
-    const data = (await res.json()) as {
-      summary?: {
-        api_requests?: number;
-        primary_model?: string;
-        compression?: {
-          requests_compressed?: number;
-          avg_compression_pct?: number;
-          best_compression_pct?: number;
-          best_detail?: string;
-          total_tokens_removed?: number;
-          total_tokens_before?: number;
-        };
-        uncompressed_requests?: { prefix_frozen?: number };
-        cost?: {
-          with_headroom_usd?: number;
-          without_headroom_usd?: number;
-          total_saved_usd?: number;
-          savings_pct?: number;
-        };
-      };
-    };
+    const data = statsPayload.parse(await res.json());
     const s = data.summary ?? {};
+    const sessions = Object.entries(data.savings?.per_project ?? {})
+      .map(([id, p]) => ({
+        id,
+        requests: p.requests,
+        tokensSaved: p.tokens_saved,
+        costSaved: p.compression_savings_usd,
+        savingsPct: p.savings_percent,
+        lastActivityAt: p.last_activity_at,
+      }))
+      .sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""))
+      .slice(0, 8);
     return {
       live: true,
       port,
@@ -50,6 +86,7 @@ export async function getHeadroomStats(): Promise<HeadroomStats> {
       costSaved: s.cost?.total_saved_usd,
       costSavingsPct: s.cost?.savings_pct,
       fetchedAt: new Date().toISOString(),
+      sessions,
     };
   } catch (error) {
     return { live: false, error: String(error), port };
