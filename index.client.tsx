@@ -1,6 +1,6 @@
 import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
-import { SavingsPanel } from "./client/panel";
+import { SavingsPanel, SavingsScreen } from "./client/panel";
 
 function SavingsItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
@@ -20,7 +20,7 @@ export default function contribute(client: PluginClientContext) {
     context: "workspace",
     Component: SavingsPanel,
   });
-  client.addScreen({ id: "savings", title: "Headroom savings", Component: SavingsPanel });
+  client.addScreen({ id: "savings", title: "Headroom savings", Component: SavingsScreen });
   client.addSidebarHeaderItem({ id: "savings", title: "Headroom savings", Component: SavingsItem });
   return () => {};
 }

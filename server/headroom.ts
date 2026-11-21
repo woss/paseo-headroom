@@ -1,5 +1,8 @@
+import { readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
-import type { HeadroomStats } from "../shared/headroom";
+import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 
 // Uses the same env var as the headroom CLI; default matches `headroom proxy`.
 const port = process.env.HEADROOM_PORT ?? "8787";
@@ -48,7 +51,45 @@ const statsPayload = z.object({
     .optional(),
 });
 
-export async function getHeadroomStats(): Promise<HeadroomStats> {
+// omp session UUIDs appear in "<timestamp>_<uuid>" file and dir names.
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+function sessionStoreIds(cwd: string): Set<string> {
+  const slug = cwd.startsWith(homedir())
+    ? cwd.slice(homedir().length).replaceAll("/", "-")
+    : cwd.replaceAll("/", "-");
+  const dir = join(homedir(), ".omp", "agent", "sessions", slug);
+  try {
+    const ids = new Set<string>();
+    for (const entry of readdirSync(dir)) {
+      const match = UUID_RE.exec(entry);
+      if (match) ids.add(match[0]);
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
+
+function ledgerSessions(
+  perProject: Record<string, { requests?: number; tokens_saved?: number; compression_savings_usd?: number; savings_percent?: number; last_activity_at?: string }> | undefined,
+  filterIds?: Set<string>,
+): HeadroomSession[] {
+  return Object.entries(perProject ?? {})
+    .map(([id, p]) => ({
+      id,
+      requests: p.requests,
+      tokensSaved: p.tokens_saved,
+      costSaved: p.compression_savings_usd,
+      savingsPct: p.savings_percent,
+      lastActivityAt: p.last_activity_at,
+    }))
+    .filter((s) => filterIds === undefined || filterIds.has(s.id))
+    .sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""))
+    .slice(0, 8);
+}
+
+export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<HeadroomStats> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 3000);
   try {
@@ -58,17 +99,10 @@ export async function getHeadroomStats(): Promise<HeadroomStats> {
     if (!res.ok) return { live: false, error: `proxy HTTP ${res.status}`, port };
     const data = statsPayload.parse(await res.json());
     const s = data.summary ?? {};
-    const sessions = Object.entries(data.savings?.per_project ?? {})
-      .map(([id, p]) => ({
-        id,
-        requests: p.requests,
-        tokensSaved: p.tokens_saved,
-        costSaved: p.compression_savings_usd,
-        savingsPct: p.savings_percent,
-        lastActivityAt: p.last_activity_at,
-      }))
-      .sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""))
-      .slice(0, 8);
+    const sessions = ledgerSessions(data.savings?.per_project);
+    const workspaceIds = cwd === undefined ? undefined : sessionStoreIds(cwd);
+    const workspaceSessions =
+      workspaceIds === undefined ? undefined : ledgerSessions(data.savings?.per_project, workspaceIds);
     return {
       live: true,
       port,
@@ -87,6 +121,7 @@ export async function getHeadroomStats(): Promise<HeadroomStats> {
       costSavingsPct: s.cost?.savings_pct,
       fetchedAt: new Date().toISOString(),
       sessions,
+      workspaceSessions,
     };
   } catch (error) {
     return { live: false, error: String(error), port };

@@ -1,6 +1,17 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
+const sessionSchema = z.object({
+  id: z.string(),
+  requests: z.number().optional(),
+  tokensSaved: z.number().optional(),
+  costSaved: z.number().optional(),
+  savingsPct: z.number().optional(),
+  lastActivityAt: z.string().optional(),
+});
+
+export type HeadroomSession = z.infer<typeof sessionSchema>;
+
 const statsSchema = z.object({
   live: z.boolean(),
   error: z.string().optional(),
@@ -19,24 +30,14 @@ const statsSchema = z.object({
   costSaved: z.number().optional(),
   costSavingsPct: z.number().optional(),
   fetchedAt: z.string().optional(),
-  sessions: z
-    .array(
-      z.object({
-        id: z.string(),
-        requests: z.number().optional(),
-        tokensSaved: z.number().optional(),
-        costSaved: z.number().optional(),
-        savingsPct: z.number().optional(),
-        lastActivityAt: z.string().optional(),
-      }),
-    )
-    .optional(),
+  sessions: z.array(sessionSchema).optional(),
+  workspaceSessions: z.array(sessionSchema).optional(),
 });
 
 export type HeadroomStats = z.infer<typeof statsSchema>;
 
 export const headroomStats = defineRpc({
   name: "headroom.stats",
-  input: z.object({}),
+  input: z.object({ cwd: z.string().optional() }),
   output: statsSchema,
 });

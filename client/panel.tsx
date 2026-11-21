@@ -1,10 +1,10 @@
-import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { headroomStats } from "../shared/headroom";
-import type { HeadroomStats } from "../shared/headroom";
+import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 
 // One surface for both registrations: workspace panels and screens share theme + layout.
 type SurfaceProps = Pick<PluginScreenProps, "theme" | "layout">;
@@ -75,11 +75,77 @@ function StatCard({
   );
 }
 
-export function SavingsPanel({ theme, layout }: SurfaceProps) {
+function SessionList({
+  sessions,
+  theme,
+  compactLayout,
+  markFirst,
+}: {
+  sessions: HeadroomSession[];
+  theme: SurfaceProps["theme"];
+  compactLayout: boolean;
+  markFirst: boolean;
+}) {
+  return (
+    <View
+      style={{
+        gap: 10,
+        padding: compactLayout ? 10 : 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      }}
+    >
+      {sessions.map((session, i) => (
+        <View key={session.id} style={{ gap: 10 }}>
+          {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ width: 8, alignItems: "center" }}>
+              {markFirst && i === 0 && (
+                <View
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: theme.colors.statusSuccess,
+                  }}
+                />
+              )}
+            </View>
+            <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
+              {session.id.slice(0, 8)}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
+              {compact(session.tokensSaved)}
+            </Text>
+            <View
+              style={{
+                borderRadius: 999,
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <Text style={{ color: theme.colors.foreground, fontSize: 10, fontWeight: "600" }}>
+                {pct(session.savingsPct)}
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{usd(session.costSaved)}</Text>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{ago(session.lastActivityAt)}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function SavingsSurface({ theme, layout, cwd }: SurfaceProps & { cwd?: string }) {
   const getStats = useRpc(headroomStats);
   const query = useQuery({
-    queryKey: ["headroom-stats"],
-    queryFn: () => getStats({}),
+    queryKey: ["headroom-stats", cwd ?? "all"],
+    queryFn: () => getStats({ cwd }),
     refetchInterval: 5000,
   });
   const s: HeadroomStats | undefined = query.data;
@@ -112,25 +178,6 @@ export function SavingsPanel({ theme, layout }: SurfaceProps) {
       heroSub: { color: theme.colors.foregroundMuted, fontSize: c ? 12 : 14 },
       grid: { flexDirection: "row" as const, gap: 10 },
       section: { gap: 8 },
-      card: {
-        gap: 10,
-        padding: c ? 10 : 14,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface1,
-      },
-      row: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-      sessionId: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
-      sessionMeta: { color: theme.colors.foregroundMuted, fontSize: 11 },
-      pill: {
-        borderRadius: 999,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        backgroundColor: theme.colors.surface2,
-      },
-      pillText: { color: theme.colors.foreground, fontSize: 10, fontWeight: "600" as const },
-      value: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
     }),
     [theme, c, s?.live],
@@ -159,6 +206,13 @@ export function SavingsPanel({ theme, layout }: SurfaceProps) {
 
   const savedPct =
     s?.tokensSaved !== undefined && s.tokensBefore ? (s.tokensSaved / s.tokensBefore) * 100 : undefined;
+
+  // With a workspace cwd, the proxy ledger rows in this workspace's omp session
+  // store are "this workspace"; the rest are other sessions.
+  const workspaceSet = new Set(s?.workspaceSessions?.map((x) => x.id) ?? []);
+  const otherSessions = cwd
+    ? (s?.sessions ?? []).filter((x) => !workspaceSet.has(x.id))
+    : (s?.sessions ?? []);
 
   return (
     <ScrollView style={styles.screen}>
@@ -205,40 +259,30 @@ export function SavingsPanel({ theme, layout }: SurfaceProps) {
         </View>
       </View>
 
-      {s?.sessions !== undefined && s.sessions.length > 0 && (
+      {cwd && s?.workspaceSessions !== undefined && s.workspaceSessions.length > 0 && (
         <View style={styles.section}>
-          <Micro theme={theme}>Sessions</Micro>
-          <View style={styles.card}>
-            {s.sessions.map((session, i) => (
-              <View key={session.id} style={{ gap: 10 }}>
-                {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
-                <View style={styles.row}>
-                  <View style={{ width: 8, alignItems: "center" }}>
-                    {i === 0 && (
-                      <View
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: theme.colors.statusSuccess,
-                        }}
-                      />
-                    )}
-                  </View>
-                  <Text style={styles.sessionId}>{session.id.slice(0, 8)}</Text>
-                  <View style={{ flex: 1 }} />
-                  <Text style={styles.value}>{compact(session.tokensSaved)}</Text>
-                  <View style={styles.pill}>
-                    <Text style={styles.pillText}>{pct(session.savingsPct)}</Text>
-                  </View>
-                  <Text style={styles.sessionMeta}>{usd(session.costSaved)}</Text>
-                  <Text style={styles.sessionMeta}>{ago(session.lastActivityAt)}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
+          <Micro theme={theme}>This workspace</Micro>
+          <SessionList sessions={s.workspaceSessions} theme={theme} compactLayout={c} markFirst />
+        </View>
+      )}
+
+      {otherSessions.length > 0 && (
+        <View style={styles.section}>
+          <Micro theme={theme}>{cwd ? "Other sessions" : "Sessions"}</Micro>
+          <SessionList sessions={otherSessions} theme={theme} compactLayout={c} markFirst={!cwd} />
         </View>
       )}
     </ScrollView>
   );
+}
+
+// Workspace panel: scoped to the workspace the + menu opened it from.
+export function SavingsPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
+  const directory = useWorkspace(workspaceId, (w) => w.directory);
+  return <SavingsSurface theme={theme} layout={layout} cwd={directory ?? undefined} />;
+}
+
+// Sidebar screen: no workspace context; shows every session the proxy has seen.
+export function SavingsScreen({ theme, layout }: PluginScreenProps) {
+  return <SavingsSurface theme={theme} layout={layout} />;
 }
