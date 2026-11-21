@@ -9,7 +9,7 @@ import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 // One surface for both registrations: workspace panels and screens share theme + layout.
 type SurfaceProps = Pick<PluginScreenProps, "theme" | "layout">;
 
-function compact(n: number | undefined): string {
+export function compact(n: number | undefined): string {
   if (n === undefined) return "—";
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -18,7 +18,9 @@ function compact(n: number | undefined): string {
 }
 
 const usd = (n: number | undefined) => (n === undefined ? "—" : `$${n.toFixed(2)}`);
-const pct = (n: number | undefined) => (n === undefined ? "—" : `${n.toFixed(1)}%`);
+export function pct(n: number | undefined): string {
+  return n === undefined ? "—" : `${n.toFixed(1)}%`;
+}
 
 function ago(iso: string | undefined): string {
   if (!iso) return "—";
