@@ -1,0 +1,10 @@
+{
+  "id": "paseo-headroom",
+  "name": "Headroom Savings",
+  "description": "Live Headroom proxy savings — tokens removed, compression, and cost — in a workspace panel.",
+  "icon": "assets/icon.png",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.16.2"
+  }
+}
