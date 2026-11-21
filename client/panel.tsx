@@ -1,8 +1,8 @@
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { headroomStats } from "../shared/headroom";
 import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 
@@ -18,6 +18,7 @@ export function compact(n: number | undefined): string {
 }
 
 const usd = (n: number | undefined) => (n === undefined ? "—" : `$${n.toFixed(2)}`);
+
 export function pct(n: number | undefined): string {
   return n === undefined ? "—" : `${n.toFixed(1)}%`;
 }
@@ -77,73 +78,194 @@ function StatCard({
   );
 }
 
-function SessionList({
+type SessionAgent = { id: string; title: string | null; lastActivityAt: string };
+
+/** Subscribes to the host's agents; used to link ledger rows to openable conversations. */
+function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): SessionAgent[] {
+  const [agents, setAgents] = useState<SessionAgent[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    const ac = new AbortController();
+    void paseo.agents
+      .list({ subscribe: {}, signal: ac.signal })
+      .then(({ subscription }) => {
+        subscription.subscribe({
+          snapshot: ({ entries }) => {
+            setAgents(
+              entries
+                .map(({ agent }) => ({
+                  id: agent.id,
+                  title: agent.title,
+                  lastActivityAt: agent.updatedAt,
+                }))
+                .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)),
+            );
+          },
+          update: () => {},
+        });
+        return undefined;
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [paseo, enabled]);
+  return agents;
+}
+
+/**
+ * Joins proxy ledger rows to Paseo agents by last-activity proximity: an omp
+ * session's most recent proxy request and its agent's last turn land within
+ * minutes of each other. Unmatched rows stay plain session ids.
+ */
+function matchAgents(sessions: HeadroomSession[], agents: SessionAgent[]): Map<string, SessionAgent> {
+  const matches = new Map<string, SessionAgent>();
+  const usedAgents = new Set<string>();
+  for (const session of sessions) {
+    if (session.lastActivityAt === undefined) continue;
+    const sessionTime = new Date(session.lastActivityAt).getTime();
+    let best: { agent: SessionAgent; delta: number } | undefined;
+    for (const agent of agents) {
+      if (usedAgents.has(agent.id)) continue;
+      const delta = Math.abs(new Date(agent.lastActivityAt).getTime() - sessionTime);
+      if (delta < 20 * 60 * 1000 && (best === undefined || delta < best.delta)) {
+        best = { agent, delta };
+      }
+    }
+    if (best !== undefined) {
+      matches.set(session.id, best.agent);
+      usedAgents.add(best.agent.id);
+    }
+  }
+  return matches;
+}
+
+function SessionRow({
+  session,
+  agent,
+  live,
+  theme,
+  onPress,
+}: {
+  session: HeadroomSession;
+  agent?: SessionAgent;
+  live: boolean;
+  theme: SurfaceProps["theme"];
+  onPress?: () => void;
+}) {
+  const linkable = agent !== undefined && onPress !== undefined;
+  return (
+    <Pressable
+      accessibilityRole={linkable ? "button" : undefined}
+      accessibilityLabel={
+        linkable ? `Open session ${agent?.title ?? session.id.slice(0, 8)}` : undefined
+      }
+      onPress={onPress}
+      disabled={!linkable}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+    >
+      <View style={{ width: 8, alignItems: "center" }}>
+        {live && (
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.colors.statusSuccess }} />
+        )}
+      </View>
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            color: linkable ? theme.colors.accent : theme.colors.foreground,
+            fontSize: 12,
+            fontWeight: "600",
+          }}
+        >
+          {agent?.title ?? session.id.slice(0, 8)}
+          {linkable ? "  ↗" : ""}
+        </Text>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>
+          {session.id.slice(0, 8)} · {usd(session.costSaved)} · {ago(session.lastActivityAt)}
+        </Text>
+      </View>
+      <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+        {compact(session.tokensSaved)}
+      </Text>
+      <View
+        style={{
+          borderRadius: 999,
+          paddingHorizontal: 8,
+          paddingVertical: 2,
+          backgroundColor: theme.colors.surface2,
+        }}
+      >
+        <Text style={{ color: theme.colors.foreground, fontSize: 10, fontWeight: "600" }}>
+          {pct(session.savingsPct)}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function SessionSection({
+  label,
   sessions,
+  agents,
   theme,
   compactLayout,
-  markFirst,
+  match,
+  onOpenAgent,
 }: {
+  label: string;
   sessions: HeadroomSession[];
+  agents: SessionAgent[];
   theme: SurfaceProps["theme"];
   compactLayout: boolean;
-  markFirst: boolean;
+  match: boolean;
+  onOpenAgent?: (input: { agentId: string }) => void;
 }) {
+  if (sessions.length === 0) return null;
+  const links = match ? matchAgents(sessions, agents) : new Map<string, SessionAgent>();
   return (
-    <View
-      style={{
-        gap: 10,
-        padding: compactLayout ? 10 : 14,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface1,
-      }}
-    >
-      {sessions.map((session, i) => (
-        <View key={session.id} style={{ gap: 10 }}>
-          {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ width: 8, alignItems: "center" }}>
-              {markFirst && i === 0 && (
-                <View
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: theme.colors.statusSuccess,
-                  }}
-                />
-              )}
+    <View style={{ gap: 8 }}>
+      <Micro theme={theme}>{label}</Micro>
+      <View
+        style={{
+          gap: compactLayout ? 10 : 12,
+          padding: compactLayout ? 10 : 14,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface1,
+        }}
+      >
+        {sessions.map((session, i) => {
+          const agent = links.get(session.id);
+          return (
+            <View key={session.id} style={{ gap: compactLayout ? 10 : 12 }}>
+              {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
+              <SessionRow
+                session={session}
+                agent={agent}
+                live={match && i === 0}
+                theme={theme}
+                onPress={agent && onOpenAgent ? () => onOpenAgent({ agentId: agent.id }) : undefined}
+              />
             </View>
-            <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
-              {session.id.slice(0, 8)}
-            </Text>
-            <View style={{ flex: 1 }} />
-            <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
-              {compact(session.tokensSaved)}
-            </Text>
-            <View
-              style={{
-                borderRadius: 999,
-                paddingHorizontal: 8,
-                paddingVertical: 2,
-                backgroundColor: theme.colors.surface2,
-              }}
-            >
-              <Text style={{ color: theme.colors.foreground, fontSize: 10, fontWeight: "600" }}>
-                {pct(session.savingsPct)}
-              </Text>
-            </View>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{usd(session.costSaved)}</Text>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{ago(session.lastActivityAt)}</Text>
-          </View>
-        </View>
-      ))}
+          );
+        })}
+      </View>
     </View>
   );
 }
 
-function SavingsSurface({ theme, layout, cwd }: SurfaceProps & { cwd?: string }) {
+function SavingsSurface({
+  theme,
+  layout,
+  cwd,
+  workspaceId,
+  openAgent,
+}: SurfaceProps & {
+  cwd?: string;
+  workspaceId?: string;
+  openAgent?: (input: { agentId: string }) => void;
+}) {
+  const paseo = usePaseo();
   const getStats = useRpc(headroomStats);
   const query = useQuery({
     queryKey: ["headroom-stats", cwd ?? "all"],
@@ -152,6 +274,9 @@ function SavingsSurface({ theme, layout, cwd }: SurfaceProps & { cwd?: string })
   });
   const s: HeadroomStats | undefined = query.data;
   const c = layout.compact;
+  // Agent linking only where the surface knows its workspace; time-proximity is
+  // meaningless across projects.
+  const agents = useAgents(paseo, workspaceId !== undefined);
 
   const styles = useMemo(
     () => ({
@@ -262,26 +387,43 @@ function SavingsSurface({ theme, layout, cwd }: SurfaceProps & { cwd?: string })
       </View>
 
       {cwd && s?.workspaceSessions !== undefined && s.workspaceSessions.length > 0 && (
-        <View style={styles.section}>
-          <Micro theme={theme}>This workspace</Micro>
-          <SessionList sessions={s.workspaceSessions} theme={theme} compactLayout={c} markFirst />
-        </View>
+        <SessionSection
+          label="This workspace"
+          sessions={s.workspaceSessions}
+          agents={agents}
+          theme={theme}
+          compactLayout={c}
+          match
+          onOpenAgent={openAgent}
+        />
       )}
 
       {otherSessions.length > 0 && (
-        <View style={styles.section}>
-          <Micro theme={theme}>{cwd ? "Other sessions" : "Sessions"}</Micro>
-          <SessionList sessions={otherSessions} theme={theme} compactLayout={c} markFirst={!cwd} />
-        </View>
+        <SessionSection
+          label={cwd ? "Other sessions" : "Sessions"}
+          sessions={otherSessions}
+          agents={[]}
+          theme={theme}
+          compactLayout={c}
+          match={false}
+        />
       )}
     </ScrollView>
   );
 }
 
 // Workspace panel: scoped to the workspace the + menu opened it from.
-export function SavingsPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
+export function SavingsPanel({ theme, layout, workspaceId, navigation }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, (w) => w.directory);
-  return <SavingsSurface theme={theme} layout={layout} cwd={directory ?? undefined} />;
+  return (
+    <SavingsSurface
+      theme={theme}
+      layout={layout}
+      cwd={directory ?? undefined}
+      workspaceId={workspaceId}
+      openAgent={navigation?.openAgent}
+    />
+  );
 }
 
 // Sidebar screen: no workspace context; shows every session the proxy has seen.
