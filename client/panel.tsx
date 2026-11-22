@@ -519,7 +519,7 @@ function SavingsSurface({
               <Text style={styles.value}>{usd(currentSession.costSaved)}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.key}>Full-price input</Text>
+              <Text style={styles.key}>Uncached-rate input</Text>
               <Text style={styles.value}>
                 {currentSession.inputCost !== undefined && currentSession.inputCost > 0
                   ? usd(currentSession.inputCost)
@@ -943,7 +943,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
               <Text style={styles.value}>{usd(session.costSaved)}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.key}>Full-price input</Text>
+              <Text style={styles.key}>Uncached-rate input</Text>
               <Text style={styles.value}>
                 {session.inputCost !== undefined && session.inputCost > 0 ? usd(session.inputCost) : "—"}
               </Text>
