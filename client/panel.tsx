@@ -156,8 +156,12 @@ function SplitBar({
  * agent's last turn land within minutes of each other. Unmatched rows stay
  * plain session ids.
  */
-function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): SessionAgent[] {
-  const [agents, setAgents] = useState<SessionAgent[]>([]);
+function useAgents(
+  paseo: ReturnType<typeof usePaseo>,
+  enabled: boolean,
+  workspaceId?: string,
+): (SessionAgent & { workspaceId: string })[] {
+  const [agents, setAgents] = useState<(SessionAgent & { workspaceId: string })[]>([]);
   useEffect(() => {
     if (!enabled) return;
     const ac = new AbortController();
@@ -172,7 +176,9 @@ function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): Sessio
                   id: agent.id,
                   title: agent.title,
                   lastActivityAt: agent.updatedAt,
+                  workspaceId: agent.workspaceId,
                 }))
+                .filter((a) => workspaceId === undefined || a.workspaceId === workspaceId)
                 .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)),
             );
           },
@@ -182,7 +188,7 @@ function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): Sessio
       })
       .catch(() => {});
     return () => ac.abort();
-  }, [paseo, enabled]);
+  }, [paseo, enabled, workspaceId]);
   return agents;
 }
 
@@ -345,7 +351,17 @@ function SavingsSurface({
   const c = layout.compact;
   // Agent linking only where the surface knows its workspace; time-proximity is
   // meaningless across projects.
-  const agents = useAgents(paseo, workspaceId !== undefined);
+  const agents = useAgents(paseo, workspaceId !== undefined, workspaceId);
+  // The workspace shows one agent conversation; its most recently active agent
+  // is the one on screen. Nearest ledger row = that agent's current session.
+  const activeAgent = agents[0];
+  const currentSession =
+    workspaceId !== undefined &&
+    activeAgent !== undefined &&
+    s?.workspaceSessions !== undefined &&
+    s.workspaceSessions.length > 0
+      ? nearestSession(s.workspaceSessions, activeAgent)
+      : undefined;
 
   const styles = useMemo(
     () => ({
@@ -410,6 +426,9 @@ function SavingsSurface({
       eqTextAccent: { color: theme.colors.accentForeground },
       grid: { flexDirection: "row" as const, gap: 12 },
       section: { gap: 10 },
+      row: { flexDirection: "row" as const, justifyContent: "space-between" as const },
+      key: { color: theme.colors.foregroundMuted, fontSize: 12 },
+      value: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
     }),
     [theme, c, s?.live, stale],
@@ -454,9 +473,63 @@ function SavingsSurface({
         <Text style={styles.model}>{s?.model ?? ""}</Text>
       </View>
 
+      {currentSession !== undefined && (
+        <View style={styles.hero}>
+          <View style={styles.header}>
+            <View style={{ width: 8, alignItems: "center" }}>
+              <View
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: theme.colors.statusSuccess,
+                }}
+              />
+            </View>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: theme.colors.accent,
+                fontSize: c ? 13 : 15,
+                fontWeight: "700",
+                flex: 1,
+              }}
+            >
+              {activeAgent?.title ?? currentSession.id.slice(0, 8)}
+            </Text>
+          </View>
+          <View style={{ gap: 2 }}>
+            <Micro theme={theme}>This session</Micro>
+            <Text style={styles.heroNumber}>{compact(currentSession.tokensSaved)}</Text>
+            <Text style={styles.heroSub}>
+              {compact(currentSession.requests)} requests · {pct(currentSession.savingsPct)} lighter ·{" "}
+              {ago(currentSession.lastActivityAt)}
+            </Text>
+          </View>
+          <View style={styles.box}>
+            <View style={styles.row}>
+              <Text style={styles.key}>Cost saved</Text>
+              <Text style={styles.value}>{usd(currentSession.costSaved)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Full-price input</Text>
+              <Text style={styles.value}>
+                {currentSession.inputCost !== undefined && currentSession.inputCost > 0
+                  ? usd(currentSession.inputCost)
+                  : "—"}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Input tokens</Text>
+              <Text style={styles.value}>{compact(currentSession.inputTokens)}</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       <View style={styles.hero}>
         <View style={{ gap: 2 }}>
-          <Micro theme={theme}>Tokens removed</Micro>
+          <Micro theme={theme}>Proxy totals · tokens removed</Micro>
           <Text style={styles.heroNumber}>{compact(s?.tokensSaved)}</Text>
         </View>
 
