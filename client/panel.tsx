@@ -2,8 +2,9 @@ import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plu
 import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { headroomStats } from "../shared/headroom";
+import { headroomExtras, headroomStats } from "../shared/headroom";
 import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 
 // One surface for both registrations: workspace panels and screens share theme + layout.
@@ -74,6 +75,72 @@ function StatCard({
           {sub}
         </Text>
       )}
+    </View>
+  );
+}
+
+function Card({
+  theme,
+  compactLayout,
+  children,
+}: {
+  theme: SurfaceProps["theme"];
+  compactLayout: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View
+      style={{
+        gap: 8,
+        flex: 1,
+        padding: compactLayout ? 12 : 18,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function SplitBar({
+  segments,
+  theme,
+}: {
+  segments: { label: string; value: number; color: string }[];
+  theme: SurfaceProps["theme"];
+}) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0) || 1;
+  return (
+    <View style={{ gap: 8 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          height: 8,
+          borderRadius: 4,
+          overflow: "hidden",
+          backgroundColor: theme.colors.surface2,
+        }}
+      >
+        {segments.map(
+          (s) =>
+            s.value > 0 && (
+              <View key={s.label} style={{ flexGrow: s.value / total, backgroundColor: s.color }} />
+            ),
+        )}
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        {segments.map((s) => (
+          <View key={s.label} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.color }} />
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+              {s.label} {compact(s.value)}
+            </Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -180,7 +247,11 @@ function SessionRow({
           {linkable ? "  ↗" : ""}
         </Text>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-          {session.id.slice(0, 8)} · {usd(session.costSaved)} · {ago(session.lastActivityAt)}
+          {session.id.slice(0, 8)} · {usd(session.costSaved)}
+          {session.inputCost !== undefined && session.inputCost > 0
+            ? ` of ${usd(session.inputCost)}`
+            : ""}{" "}
+          · {ago(session.lastActivityAt)}
         </Text>
       </View>
       <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
@@ -273,6 +344,12 @@ function SavingsSurface({
     refetchInterval: 5000,
   });
   const s: HeadroomStats | undefined = query.data;
+  const getExtras = useRpc(headroomExtras);
+  const extras = useQuery({
+    queryKey: ["headroom-extras"],
+    queryFn: () => getExtras({ inspectLimit: 8 }),
+    refetchInterval: 15000,
+  }).data;
   const c = layout.compact;
   // Agent linking only where the surface knows its workspace; time-proximity is
   // meaningless across projects.
@@ -418,6 +495,41 @@ function SavingsSurface({
         </View>
       </View>
 
+      {s?.tip && (
+        <View
+          style={{
+            gap: 2,
+            padding: c ? 10 : 14,
+            borderRadius: 12,
+            borderLeftWidth: 3,
+            borderLeftColor: theme.colors.accent,
+            backgroundColor: theme.colors.surface1,
+          }}
+        >
+          <Micro theme={theme}>Tip</Micro>
+          <Text style={{ color: theme.colors.foreground, fontSize: 12 }}>{s.tip}</Text>
+        </View>
+      )}
+
+      {extras?.ledger !== undefined && (
+        <View style={styles.grid}>
+          <StatCard
+            label="Saved today"
+            value={usd(extras.ledger.today?.costUsd)}
+            sub={`${compact(extras.ledger.today?.tokensSaved)} tokens · ${compact(extras.ledger.today?.calls)} calls`}
+            theme={theme}
+            compactLayout={c}
+          />
+          <StatCard
+            label="Saved lifetime"
+            value={usd(extras.ledger.lifetime?.costUsd)}
+            sub={`${compact(extras.ledger.lifetime?.tokensSaved)} tokens · ${compact(extras.ledger.lifetime?.calls)} calls`}
+            theme={theme}
+            compactLayout={c}
+          />
+        </View>
+      )}
+
       <View style={{ gap: 10 }}>
         <View style={styles.grid}>
           <StatCard label="Avg compression" value={pct(s?.avgPct)} theme={theme} compactLayout={c} />
@@ -447,6 +559,92 @@ function SavingsSurface({
         </View>
       </View>
 
+      {(s?.compressed !== undefined || s?.prefixFrozen !== undefined || s?.noCompressible !== undefined) && (
+        <View style={styles.grid}>
+          <Card theme={theme} compactLayout={c as boolean}>
+            <Micro theme={theme}>Traffic</Micro>
+            <SplitBar
+              theme={theme}
+              segments={[
+                { label: "compressed", value: s?.compressed ?? 0, color: theme.colors.statusSuccess },
+                { label: "frozen", value: s?.prefixFrozen ?? 0, color: theme.colors.accent },
+                { label: "plain", value: s?.noCompressible ?? 0, color: theme.colors.border },
+              ]}
+            />
+          </Card>
+          <Card theme={theme} compactLayout={c}>
+            <Micro theme={theme}>Savings layers</Micro>
+            {s?.layers !== undefined && s.layers.length > 0 && (
+              <SplitBar
+                theme={theme}
+                segments={s.layers.map((layer, i) => ({
+                  label: layer.name,
+                  value: Math.round(layer.usd * 100),
+                  color: [theme.colors.statusSuccess, theme.colors.accent, theme.colors.border, theme.colors.surface2][i % 4],
+                }))}
+              />
+            )}
+            <View style={{ gap: 2 }}>
+              {s?.layers?.map((layer) => (
+                <Text key={layer.name} style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                  {layer.name}: {usd(layer.usd)}
+                </Text>
+              ))}
+            </View>
+          </Card>
+        </View>
+      )}
+
+      {s?.models !== undefined && s.models.length > 0 && (
+        <View style={styles.section}>
+          <Micro theme={theme}>Model mix</Micro>
+          <Card theme={theme} compactLayout={c}>
+            {s.models.map((m, i) => {
+              const max = s.models?.[0]?.requests ?? 1;
+              return (
+                <View key={m.model} style={{ gap: c ? 10 : 12 }}>
+                  {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Text numberOfLines={1} style={{ flex: 1, color: theme.colors.foreground, fontSize: 12 }}>
+                      {m.model}
+                    </Text>
+                    <View
+                      style={{
+                        flex: 1,
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: theme.colors.surface2,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: `${Math.max(4, (m.requests / max) * 100)}%`,
+                          height: "100%",
+                          backgroundColor: theme.colors.accent,
+                        }}
+                      />
+                    </View>
+                    <Text
+                      style={{
+                        color: theme.colors.foreground,
+                        fontSize: 11,
+                        fontWeight: "600",
+                        fontVariant: ["tabular-nums"],
+                        minWidth: 36,
+                        textAlign: "right",
+                      }}
+                    >
+                      {compact(m.requests)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </Card>
+        </View>
+      )}
+
       {cwd && s?.workspaceSessions !== undefined && s.workspaceSessions.length > 0 && (
         <SessionSection
           label="This workspace"
@@ -469,6 +667,39 @@ function SavingsSurface({
           match={false}
         />
       )}
+
+      {extras?.inspect?.available === true &&
+        extras.inspect.requests !== undefined &&
+        extras.inspect.requests.length > 0 && (
+          <View style={styles.section}>
+            <Micro theme={theme}>Recent requests</Micro>
+            <Card theme={theme} compactLayout={c}>
+              {extras.inspect.requests.map((entry, i) => {
+                const pairs = Object.entries(entry);
+                const head = pairs.slice(0, 3);
+                const rest = pairs.slice(3);
+                return (
+                  <View key={i} style={{ gap: c ? 10 : 12 }}>
+                    {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
+                    <View style={{ gap: 2 }}>
+                      <Text
+                        numberOfLines={1}
+                        style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}
+                      >
+                        {head.map(([k, v]) => `${k} ${String(v)}`).join("  ·  ")}
+                      </Text>
+                      {rest.length > 0 && (
+                        <Text numberOfLines={2} style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>
+                          {rest.map(([k, v]) => `${k} ${String(v)}`).join("  ·  ")}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
+          </View>
+        )}
     </ScrollView>
   );
 }
