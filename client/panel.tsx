@@ -323,6 +323,9 @@ function SavingsSurface({
     queryKey: ["headroom-stats", cwd ?? "all"],
     queryFn: () => getStats({ cwd }),
     refetchInterval: 5000,
+    // Keep counting when the Paseo window loses focus; focus-gated polling
+    // froze the panel for an hour while the proxy kept tracking.
+    refetchIntervalInBackground: true,
   });
   const raw: HeadroomStats | undefined = query.data;
   // Transient proxy hiccups (slow /stats, abort) shouldn't blank the panel:
@@ -337,6 +340,7 @@ function SavingsSurface({
     queryKey: ["headroom-extras"],
     queryFn: () => getExtras({ inspectLimit: 8 }),
     refetchInterval: 15000,
+    refetchIntervalInBackground: true,
   }).data;
   const c = layout.compact;
   // Agent linking only where the surface knows its workspace; time-proximity is
@@ -732,6 +736,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
     queryFn: () => getStats({ cwd: agent?.cwd }),
     enabled: agent?.cwd !== undefined,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
   });
   const raw: HeadroomStats | undefined = query.data;
   const lastLive = useRef<HeadroomStats | undefined>(undefined);
