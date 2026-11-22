@@ -449,8 +449,8 @@ function SavingsSurface({
           <View style={styles.dot} />
           <Text style={styles.title}>Headroom proxy not reachable</Text>
         </View>
-        <Text style={styles.muted}>Start it with `headroom proxy` (port {s?.port ?? "8787"}).</Text>
-        <Text style={styles.muted}>{s.error}</Text>
+        <Text style={styles.muted}>Start it with `headroom proxy` (port {raw?.port ?? "8787"}).</Text>
+        <Text style={styles.muted}>{raw.error}</Text>
       </View>
     );
   }
@@ -813,7 +813,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
           <View style={styles.dot} />
           <Text style={styles.title}>Proxy not reachable</Text>
         </View>
-        <Text style={styles.muted}>{s.error}</Text>
+        <Text style={styles.muted}>{raw.error}</Text>
         <Pressable
           accessibilityRole="button"
           onPress={close}
