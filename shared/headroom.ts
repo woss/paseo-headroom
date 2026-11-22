@@ -6,8 +6,6 @@ const sessionSchema = z.object({
   requests: z.number().optional(),
   tokensSaved: z.number().optional(),
   inputTokens: z.number().optional(),
-  costSaved: z.number().optional(),
-  inputCost: z.number().optional(),
   savingsPct: z.number().optional(),
   lastActivityAt: z.string().optional(),
 });
@@ -29,15 +27,8 @@ const statsSchema = z.object({
   avgPct: z.number().optional(),
   bestPct: z.number().optional(),
   bestDetail: z.string().optional(),
-  costWith: z.number().optional(),
-  costWithout: z.number().optional(),
-  costSaved: z.number().optional(),
-  costSavingsPct: z.number().optional(),
-  layers: z
-    .array(z.object({ name: z.string(), usd: z.number() }))
-    .optional(),
-  models: z.array(z.object({ model: z.string(), requests: z.number() })).optional(),
   fetchedAt: z.string().optional(),
+  models: z.array(z.object({ model: z.string(), requests: z.number() })).optional(),
   sessions: z.array(sessionSchema).optional(),
   workspaceSessions: z.array(sessionSchema).optional(),
 });
@@ -52,7 +43,6 @@ export const headroomStats = defineRpc({
 
 const windowSchema = z.object({
   tokensSaved: z.number().optional(),
-  costUsd: z.number().optional(),
   calls: z.number().optional(),
   savingsPct: z.number().optional(),
 });

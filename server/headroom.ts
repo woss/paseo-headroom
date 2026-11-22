@@ -56,22 +56,6 @@ const statsPayload = z.object({
         })
         .optional(),
       tip: z.string().optional(),
-      cost: z
-        .object({
-          with_headroom_usd: z.number().optional(),
-          without_headroom_usd: z.number().optional(),
-          total_saved_usd: z.number().optional(),
-          savings_pct: z.number().optional(),
-          breakdown: z
-            .object({
-              compression_savings_usd: z.number().optional(),
-              cache_savings_usd: z.number().optional(),
-              tool_search_savings_usd: z.number().optional(),
-              extension_realized_usd: z.number().optional(),
-            })
-            .optional(),
-        })
-        .optional(),
     })
     .optional(),
   agent_usage: z
@@ -94,9 +78,7 @@ const statsPayload = z.object({
           z.object({
             requests: z.number().optional(),
             tokens_saved: z.number().optional(),
-            compression_savings_usd: z.number().optional(),
             total_input_tokens: z.number().optional(),
-            total_input_cost_usd: z.number().optional(),
             savings_percent: z.number().optional(),
             last_activity_at: z.string().optional(),
           }),
@@ -109,10 +91,7 @@ const statsPayload = z.object({
 // omp session UUIDs appear in "<timestamp>_<uuid>" file and dir names.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-export function sessionStoreIds(
-  cwd: string,
-  baseDir: string = join(homedir(), ".omp", "agent", "sessions"),
-): Set<string> {
+export function sessionStoreIds(cwd: string, baseDir: string = join(homedir(), ".omp", "agent", "sessions")): Set<string> {
   const slug = cwd.startsWith(homedir())
     ? cwd.slice(homedir().length).replaceAll("/", "-")
     : cwd.replaceAll("/", "-");
@@ -132,9 +111,7 @@ export function sessionStoreIds(
 type LedgerRow = {
   requests?: number;
   tokens_saved?: number;
-  compression_savings_usd?: number;
   total_input_tokens?: number;
-  total_input_cost_usd?: number;
   savings_percent?: number;
   last_activity_at?: string;
 };
@@ -149,8 +126,6 @@ export function ledgerSessions(
       requests: p.requests,
       tokensSaved: p.tokens_saved,
       inputTokens: p.total_input_tokens,
-      costSaved: p.compression_savings_usd,
-      inputCost: p.total_input_cost_usd,
       savingsPct: p.savings_percent,
       lastActivityAt: p.last_activity_at,
     }))
@@ -183,15 +158,6 @@ export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<Headr
       .map(([model, requests]) => ({ model, requests }))
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5);
-    const b = s.cost?.breakdown;
-    const layers = b
-      ? ([
-          { name: "compression", usd: b.compression_savings_usd },
-          { name: "cache", usd: b.cache_savings_usd },
-          { name: "tool search", usd: b.tool_search_savings_usd },
-          { name: "extension", usd: b.extension_realized_usd },
-        ].filter((l): l is { name: string; usd: number } => typeof l.usd === "number"))
-      : undefined;
     return {
       live: true,
       port,
@@ -206,12 +172,6 @@ export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<Headr
       avgPct: s.compression?.avg_compression_pct,
       bestPct: s.compression?.best_compression_pct,
       bestDetail: s.compression?.best_detail,
-      costWith: s.cost?.with_headroom_usd,
-      costWithout: s.cost?.without_headroom_usd,
-      costSaved: s.cost?.total_saved_usd,
-      costSavingsPct: s.cost?.savings_pct,
-      layers,
-      models,
       fetchedAt: new Date().toISOString(),
       sessions,
       workspaceSessions,
@@ -228,13 +188,12 @@ export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<Headr
 // later always supersedes an older one (out-of-order completions never win).
 // Cached errors serve for the TTL so a broken CLI cannot spam subprocesses. ---
 
-type WindowData = { tokensSaved?: number; costUsd?: number; calls?: number; savingsPct?: number };
+type WindowData = { tokensSaved?: number; calls?: number; savingsPct?: number };
 
 export function pickWindow(w: unknown): WindowData | undefined {
   const v = z
     .object({
       tokens_saved: z.number().optional(),
-      cost_usd: z.number().optional(),
       calls: z.number().optional(),
       savings_percent: z.number().optional(),
     })
@@ -242,7 +201,6 @@ export function pickWindow(w: unknown): WindowData | undefined {
   return v.success
     ? {
         tokensSaved: v.data.tokens_saved,
-        costUsd: v.data.cost_usd,
         calls: v.data.calls,
         savingsPct: v.data.savings_percent,
       }
@@ -308,13 +266,7 @@ async function getInspect(limit: number): Promise<ExtrasInspect> {
   const startedAt = Date.now();
   const sameKey = inspectStore.key === limit;
   if (sameKey && cached !== null && startedAt - cached.startedAt <= INSPECT_TTL) return cached.value;
-  // Join an in-flight refresh for the same limit; a different limit refreshes in parallel.
-  if (
-    inspectStore.inflight !== null &&
-    (inspectStore.inflightKey === limit || inspectStore.key === limit)
-  ) {
-    return inspectStore.inflight;
-  }
+  if (sameKey && inspectStore.inflight !== null) return inspectStore.inflight;
   inspectStore.inflightKey = limit;
   const inflight = (async () => {
     let value: ExtrasInspect;

@@ -23,8 +23,6 @@ export function compact(n: number | undefined): string {
   return String(n);
 }
 
-const usd = (n: number | undefined) => (n === undefined ? "—" : `$${n.toFixed(2)}`);
-
 export function pct(n: number | undefined): string {
   return n === undefined ? "—" : `${n.toFixed(1)}%`;
 }
@@ -234,11 +232,7 @@ function SessionRow({
           {linkable ? "  ↗" : ""}
         </Text>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-          {session.id.slice(0, 8)} · {usd(session.costSaved)}
-          {session.inputCost !== undefined && session.inputCost > 0
-            ? ` of ${usd(session.inputCost)}`
-            : ""}{" "}
-          · {ago(session.lastActivityAt)}
+          {session.id.slice(0, 8)} · {ago(session.lastActivityAt)}
         </Text>
       </View>
       <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
@@ -422,9 +416,7 @@ function SavingsSurface({
         paddingVertical: 5,
         backgroundColor: theme.colors.surface2,
       },
-      eqPillAccent: { backgroundColor: theme.colors.accent },
       eqText: { color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" as const },
-      eqTextAccent: { color: theme.colors.accentForeground },
       grid: { flexDirection: "row" as const, gap: 12 },
       section: { gap: 10 },
       row: { flexDirection: "row" as const, justifyContent: "space-between" as const },
@@ -515,20 +507,12 @@ function SavingsSurface({
           </View>
           <View style={styles.box}>
             <View style={styles.row}>
-              <Text style={styles.key}>Cost saved</Text>
-              <Text style={styles.value}>{usd(currentSession.costSaved)}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.key}>Uncached-rate input</Text>
-              <Text style={styles.value}>
-                {currentSession.inputCost !== undefined && currentSession.inputCost > 0
-                  ? usd(currentSession.inputCost)
-                  : "—"}
-              </Text>
-            </View>
-            <View style={styles.row}>
               <Text style={styles.key}>Input tokens</Text>
               <Text style={styles.value}>{compact(currentSession.inputTokens)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Last activity</Text>
+              <Text style={styles.value}>{ago(currentSession.lastActivityAt)}</Text>
             </View>
           </View>
         </View>
@@ -556,8 +540,10 @@ function SavingsSurface({
             <Text style={styles.eqText}>{compact(s?.tokensBefore)} sent</Text>
           </View>
           <Text style={styles.eqText}>−</Text>
-          <View style={[styles.eqPill, styles.eqPillAccent]}>
-            <Text style={[styles.eqText, styles.eqTextAccent]}>{compact(s?.tokensSaved)} removed</Text>
+          <View style={[styles.eqPill, { backgroundColor: theme.colors.accent }]}>
+            <Text style={[styles.eqText, { color: theme.colors.accentForeground }]}>
+              {compact(s?.tokensSaved)} removed
+            </Text>
           </View>
           <Text style={styles.eqText}>=</Text>
           <View style={styles.eqPill}>
@@ -589,98 +575,54 @@ function SavingsSurface({
 
       {extras?.ledger !== undefined && (
         <View style={styles.grid}>
-          {extras.ledger.error !== undefined ? (
-            <Card theme={theme} compactLayout={c}>
-              <Micro theme={theme}>Saved today / lifetime</Micro>
-              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-                Ledger unavailable: {extras.ledger.error}
-              </Text>
-            </Card>
-          ) : (
-            <>
-              <StatCard
-                label="Saved today"
-                value={usd(extras.ledger.today?.costUsd)}
-                sub={`${compact(extras.ledger.today?.tokensSaved)} tokens · ${compact(extras.ledger.today?.calls)} calls`}
-                theme={theme}
-                compactLayout={c}
-              />
-              <StatCard
-                label="Saved lifetime"
-                value={usd(extras.ledger.lifetime?.costUsd)}
-                sub={`${compact(extras.ledger.lifetime?.tokensSaved)} tokens · ${compact(extras.ledger.lifetime?.calls)} calls`}
-                theme={theme}
-                compactLayout={c}
-              />
-            </>
-          )}
+          <StatCard
+            label="Tokens saved today"
+            value={compact(extras.ledger.today?.tokensSaved)}
+            sub={`${compact(extras.ledger.today?.calls)} calls · ${pct(extras.ledger.today?.savingsPct)}`}
+            theme={theme}
+            compactLayout={c}
+          />
+          <StatCard
+            label="Tokens saved lifetime"
+            value={compact(extras.ledger.lifetime?.tokensSaved)}
+            sub={`${compact(extras.ledger.lifetime?.calls)} calls · ${pct(extras.ledger.lifetime?.savingsPct)}`}
+            theme={theme}
+            compactLayout={c}
+          />
         </View>
       )}
 
-      <View style={{ gap: 10 }}>
-        <View style={styles.grid}>
-          <StatCard label="Avg compression" value={pct(s?.avgPct)} theme={theme} compactLayout={c} />
-          <StatCard
-            label="Best"
-            value={pct(s?.bestPct)}
-            sub={s?.bestDetail}
-            theme={theme}
-            compactLayout={c}
-          />
-        </View>
-        <View style={styles.grid}>
-          <StatCard
-            label="Cost saved"
-            value={usd(s?.costSaved)}
-            sub={`${usd(s?.costWithout)} → ${usd(s?.costWith)}`}
-            theme={theme}
-            compactLayout={c}
-          />
-          <StatCard
-            label="Requests"
-            value={compact(s?.requests)}
-            sub={`${compact(s?.compressed)} compressed · ${compact(s?.prefixFrozen)} frozen`}
-            theme={theme}
-            compactLayout={c}
-          />
-        </View>
+      <View style={styles.grid}>
+        <StatCard
+          label="Avg compression"
+          value={pct(s?.avgPct)}
+          theme={theme}
+          compactLayout={c}
+        />
+        <StatCard
+          label="Best"
+          value={pct(s?.bestPct)}
+          sub={s?.bestDetail}
+          theme={theme}
+          compactLayout={c}
+        />
       </View>
-
-      {(s?.compressed !== undefined || s?.prefixFrozen !== undefined || s?.noCompressible !== undefined) && (
-        <View style={styles.grid}>
-          <Card theme={theme} compactLayout={c as boolean}>
-            <Micro theme={theme}>Traffic</Micro>
-            <SplitBar
-              theme={theme}
-              segments={[
-                { label: "compressed", value: s?.compressed ?? 0, color: theme.colors.statusSuccess },
-                { label: "frozen", value: s?.prefixFrozen ?? 0, color: theme.colors.accent },
-                { label: "plain", value: s?.noCompressible ?? 0, color: theme.colors.border },
-              ]}
-            />
-          </Card>
-          <Card theme={theme} compactLayout={c}>
-            <Micro theme={theme}>Savings layers</Micro>
-            {s?.layers !== undefined && s.layers.length > 0 && (
-              <SplitBar
-                theme={theme}
-                segments={s.layers.map((layer, i) => ({
-                  label: layer.name,
-                  value: Math.round(layer.usd * 100),
-                  color: [theme.colors.statusSuccess, theme.colors.accent, theme.colors.border, theme.colors.surface2][i % 4],
-                }))}
-              />
-            )}
-            <View style={{ gap: 2 }}>
-              {s?.layers?.map((layer) => (
-                <Text key={layer.name} style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                  {layer.name}: {usd(layer.usd)}
-                </Text>
-              ))}
-            </View>
-          </Card>
-        </View>
-      )}
+      <View style={styles.grid}>
+        <StatCard
+          label="Requests"
+          value={compact(s?.requests)}
+          sub={`${compact(s?.compressed)} compressed · ${compact(s?.prefixFrozen)} frozen`}
+          theme={theme}
+          compactLayout={c}
+        />
+        <StatCard
+          label="Uncompressed pass-through"
+          value={compact(s?.noCompressible)}
+          sub="requests with nothing to compress"
+          theme={theme}
+          compactLayout={c}
+        />
+      </View>
 
       {s?.models !== undefined && s.models.length > 0 && (
         <View style={styles.section}>
@@ -751,7 +693,7 @@ function SavingsSurface({
           agents={[]}
           theme={theme}
           compactLayout={c}
-          match={false}
+          match={!cwd}
         />
       )}
 
@@ -904,10 +846,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
     );
   }
 
-  const savedPct =
-    session?.tokensSaved !== undefined && session.requests !== undefined
-      ? pct(session.savingsPct)
-      : undefined;
+  const savedPct = session?.savingsPct;
 
   return (
     <View style={styles.screen}>
@@ -937,16 +876,6 @@ export function SessionPopover(props: PluginButtonContentProps) {
             <View style={styles.row}>
               <Text style={styles.key}>Requests</Text>
               <Text style={styles.value}>{compact(session.requests)}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.key}>Cost saved</Text>
-              <Text style={styles.value}>{usd(session.costSaved)}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.key}>Uncached-rate input</Text>
-              <Text style={styles.value}>
-                {session.inputCost !== undefined && session.inputCost > 0 ? usd(session.inputCost) : "—"}
-              </Text>
             </View>
             <View style={styles.row}>
               <Text style={styles.key}>Input tokens</Text>
