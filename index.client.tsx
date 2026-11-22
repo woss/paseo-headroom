@@ -1,7 +1,7 @@
 import type { PluginButtonRegistration, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { compact, pct, SavingsPanel, SavingsScreen, SessionPopover } from "./client/panel";
-import { headroomStats } from "./shared/headroom";
+import { headroomStats, nearestSession } from "./shared/headroom";
 
 function SavingsItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
@@ -24,16 +24,24 @@ export default function contribute(client: PluginClientContext) {
   client.addScreen({ id: "savings", title: "Headroom savings", Component: SavingsScreen });
   client.addSidebarHeaderItem({ id: "savings", title: "Headroom savings", Component: SavingsItem });
 
-  // Per-agent composer pill: live savings of the agent's most recent session,
-  // derived from its cwd's omp session store. Press opens the savings panel.
+  // Per-agent composer pill: live savings of the agent's current session.
+  // Agents sharing a cwd share one stats RPC per tick (coalesced below); the
+  // session is matched per agent by last-activity proximity. Press opens the
+  // session popover.
   const pills = new Map<string, PluginButtonRegistration>();
   const labels = new Map<string, string>();
-  const cwds = new Map<string, string>();
+  const agents = new Map<string, { cwd: string; title: string | null; updatedAt: string }>();
   const lifetime = new AbortController();
 
-  function registerPill(agent: { id: string; workspaceId?: string | null; cwd?: string | null }) {
-    if (lifetime.signal.aborted || !agent.workspaceId || !agent.cwd) return;
-    cwds.set(agent.id, agent.cwd);
+  function registerPill(agent: {
+    id: string;
+    workspaceId?: string | null;
+    cwd?: string | null;
+    title?: string | null;
+    updatedAt?: string | null;
+  }) {
+    if (lifetime.signal.aborted || !agent.workspaceId || !agent.cwd || !agent.updatedAt) return;
+    agents.set(agent.id, { cwd: agent.cwd, title: agent.title ?? null, updatedAt: agent.updatedAt });
     const label = labels.get(agent.id) ?? "HR …";
     pills.get(agent.id)?.remove();
     pills.set(
@@ -67,7 +75,7 @@ export default function contribute(client: PluginClientContext) {
             pills.get(update.agentId)?.remove();
             pills.delete(update.agentId);
             labels.delete(update.agentId);
-            cwds.delete(update.agentId);
+            agents.delete(update.agentId);
           }
         },
       });
@@ -75,21 +83,43 @@ export default function contribute(client: PluginClientContext) {
     })
     .catch(() => {});
 
+  // One stats RPC per distinct cwd per tick, shared by all agents on it.
   const poll = setInterval(() => {
-    for (const [agentId, cwd] of cwds) {
-      const pill = pills.get(agentId);
-      if (!pill) continue;
+    const byCwd = new Map<string, string[]>();
+    for (const [agentId, info] of agents) {
+      if (!pills.has(agentId)) continue;
+      const ids = byCwd.get(info.cwd) ?? [];
+      ids.push(agentId);
+      byCwd.set(info.cwd, ids);
+    }
+    for (const [cwd, agentIds] of byCwd) {
       void client
         .rpc(headroomStats, { cwd })
         .then((s) => {
-          if (!s.live || !s.workspaceSessions?.length) {
-            pill.update({ visible: false });
-            return;
+          for (const agentId of agentIds) {
+            const pill = pills.get(agentId);
+            if (!pill) continue;
+            const info = agents.get(agentId);
+            if (info === undefined) continue;
+            if (!s.live) {
+              pill.update({ visible: false });
+              continue;
+            }
+            // Proximity join against the agent's own last turn: no match means
+            // no attributable session, so the pill hides instead of guessing.
+            const session = nearestSession(s.workspaceSessions ?? [], {
+              id: agentId,
+              title: info.title,
+              lastActivityAt: info.updatedAt,
+            });
+            if (session === undefined) {
+              pill.update({ visible: false });
+              continue;
+            }
+            const label = `saved ${compact(session.tokensSaved)} · ${pct(session.savingsPct)}`;
+            labels.set(agentId, label);
+            pill.update({ visible: true, label });
           }
-          const current = s.workspaceSessions[0];
-          const label = `saved ${compact(current.tokensSaved)} · ${pct(current.savingsPct)}`;
-          labels.set(agentId, label);
-          pill.update({ visible: true, label });
         })
         .catch(() => {});
     }

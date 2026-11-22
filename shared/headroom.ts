@@ -80,6 +80,56 @@ export type HeadroomExtras = z.infer<typeof extrasOutput>;
 
 export const headroomExtras = defineRpc({
   name: "headroom.extras",
-  input: z.object({ inspectLimit: z.number().optional() }),
+  input: z.object({
+    inspectLimit: z.number().int().min(1).max(50).optional(),
+  }),
   output: extrasOutput,
 });
+
+// An omp session's last proxy request and its agent's last turn land within
+// minutes of each other; beyond this window a row is treated as unrelated.
+export const MATCH_WINDOW_MS = 20 * 60 * 1000;
+
+export type SessionAgent = { id: string; title: string | null; lastActivityAt: string };
+
+/** Joins ledger rows to agents by last-activity proximity, nearest first, one agent per row. */
+export function matchAgents(
+  sessions: HeadroomSession[],
+  agents: SessionAgent[],
+): Map<string, SessionAgent> {
+  const matches = new Map<string, SessionAgent>();
+  const usedAgents = new Set<string>();
+  for (const session of sessions) {
+    if (session.lastActivityAt === undefined) continue;
+    const sessionTime = new Date(session.lastActivityAt).getTime();
+    let best: { agent: SessionAgent; delta: number } | undefined;
+    for (const agent of agents) {
+      if (usedAgents.has(agent.id)) continue;
+      const delta = Math.abs(new Date(agent.lastActivityAt).getTime() - sessionTime);
+      if (delta <= MATCH_WINDOW_MS && (best === undefined || delta < best.delta)) {
+        best = { agent, delta };
+      }
+    }
+    if (best !== undefined) {
+      matches.set(session.id, best.agent);
+      usedAgents.add(best.agent.id);
+    }
+  }
+  return matches;
+}
+
+/** The one session nearest in time to an agent's last turn, or undefined when unrelated. */
+export function nearestSession(
+  sessions: HeadroomSession[],
+  agent: SessionAgent,
+): HeadroomSession | undefined {
+  let best: { row: HeadroomSession; delta: number } | undefined;
+  for (const row of sessions) {
+    if (row.lastActivityAt === undefined) continue;
+    const delta = Math.abs(new Date(row.lastActivityAt).getTime() - new Date(agent.lastActivityAt).getTime());
+    if (delta <= MATCH_WINDOW_MS && (best === undefined || delta < best.delta)) {
+      best = { row, delta };
+    }
+  }
+  return best?.row;
+}

@@ -10,16 +10,17 @@ import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
 const port = process.env.HEADROOM_PORT ?? "8787";
 
 const exec = promisify(execFile);
-const HEADROOM_CANDIDATES = [
-  process.env.HEADROOM_BIN,
-  "headroom",
-  join(homedir(), ".local", "bin", "headroom"),
-].filter((p): p is string => p !== undefined);
 
 /** Runs the headroom CLI (same machine as the daemon) for JSON reports. */
 async function runHeadroomJson(args: string[]): Promise<unknown> {
+  // Candidates are resolved per call so HEADROOM_BIN is honored at runtime.
+  const candidates = [
+    process.env.HEADROOM_BIN,
+    "headroom",
+    join(homedir(), ".local", "bin", "headroom"),
+  ].filter((p): p is string => p !== undefined);
   let lastError: unknown;
-  for (const bin of HEADROOM_CANDIDATES) {
+  for (const bin of candidates) {
     try {
       const { stdout } = await exec(bin, args, { timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
       return JSON.parse(stdout);
@@ -108,11 +109,14 @@ const statsPayload = z.object({
 // omp session UUIDs appear in "<timestamp>_<uuid>" file and dir names.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-function sessionStoreIds(cwd: string): Set<string> {
+export function sessionStoreIds(
+  cwd: string,
+  baseDir: string = join(homedir(), ".omp", "agent", "sessions"),
+): Set<string> {
   const slug = cwd.startsWith(homedir())
     ? cwd.slice(homedir().length).replaceAll("/", "-")
     : cwd.replaceAll("/", "-");
-  const dir = join(homedir(), ".omp", "agent", "sessions", slug);
+  const dir = join(baseDir, slug);
   try {
     const ids = new Set<string>();
     for (const entry of readdirSync(dir)) {
@@ -135,7 +139,7 @@ type LedgerRow = {
   last_activity_at?: string;
 };
 
-function ledgerSessions(
+export function ledgerSessions(
   perProject: Record<string, LedgerRow> | undefined,
   filterIds?: Set<string>,
 ): HeadroomSession[] {
@@ -219,11 +223,14 @@ export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<Headr
   }
 }
 
-// --- Extras: CLI-backed reports, cached so the 15s panel poll stays cheap. ---
+// --- Extras: CLI-backed reports. Refreshes are coalesced per report type, an
+// in-flight promise is shared across concurrent callers, and a refresh started
+// later always supersedes an older one (out-of-order completions never win).
+// Cached errors serve for the TTL so a broken CLI cannot spam subprocesses. ---
 
 type WindowData = { tokensSaved?: number; costUsd?: number; calls?: number; savingsPct?: number };
 
-function pickWindow(w: unknown): WindowData | undefined {
+export function pickWindow(w: unknown): WindowData | undefined {
   const v = z
     .object({
       tokens_saved: z.number().optional(),
@@ -248,52 +255,75 @@ type ExtrasInspect = {
   hint?: string;
   requests?: Array<Record<string, string | number | boolean | null>>;
 };
-type CacheEntry<T> = { at: number; key: unknown; value: T };
+type CacheEntry<T> = { startedAt: number; value: T };
 
-let ledgerCache: CacheEntry<ExtrasLedger> | null = null;
-let inspectCache: CacheEntry<ExtrasInspect> | null = null;
-
-// Cache lifetime matches the panel poll so at most one subprocess runs per poll.
 const LEDGER_TTL = 60_000;
 const INSPECT_TTL = 30_000;
 
-export async function getHeadroomExtras({
-  inspectLimit = 8,
-}: {
-  inspectLimit?: number;
-}): Promise<{ ledger?: ExtrasLedger; inspect?: ExtrasInspect }> {
-  let ledger = ledgerCache;
-  if (ledger === null || Date.now() - ledger.at > LEDGER_TTL) {
+const ledgerStore: { entry: CacheEntry<ExtrasLedger> | null; inflight: Promise<ExtrasLedger> | null } = {
+  entry: null,
+  inflight: null,
+};
+const inspectStore: {
+  entry: CacheEntry<ExtrasInspect> | null;
+  inflight: Promise<ExtrasInspect> | null;
+  inflightKey: number | null;
+  key: number | null;
+  startedAt: number;
+} = { entry: null, inflight: null, inflightKey: null, key: NaN, startedAt: 0 };
+
+async function getLedger(): Promise<ExtrasLedger> {
+  const cached = ledgerStore.entry;
+  const startedAt = Date.now();
+  if (cached !== null && startedAt - cached.startedAt <= LEDGER_TTL) return cached.value;
+  if (ledgerStore.inflight !== null) return ledgerStore.inflight;
+  const inflight = (async () => {
+    let value: ExtrasLedger;
     try {
-      const raw = await runHeadroomJson(["savings", "--json"]);
       const parsed = z
-        .object({
-          lifetime: z.unknown().optional(),
-          windows: z.record(z.string(), z.unknown()).optional(),
-        })
-        .parse(raw);
-      ledger = {
-        at: Date.now(),
-        key: null,
-        value: {
-          today: parsed.windows ? pickWindow(parsed.windows.today) : undefined,
-          lifetime: pickWindow(parsed.lifetime),
-        },
+        .object({ lifetime: z.unknown().optional(), windows: z.record(z.string(), z.unknown()).optional() })
+        .parse(await runHeadroomJson(["savings", "--json"]));
+      value = {
+        today: parsed.windows ? pickWindow(parsed.windows.today) : undefined,
+        lifetime: pickWindow(parsed.lifetime),
       };
     } catch (error) {
-      ledger = { at: Date.now(), key: null, value: { error: String(error) } };
+      value = { error: String(error) };
     }
-    ledgerCache = ledger;
+    if (ledgerStore.entry === null || ledgerStore.entry.startedAt < startedAt) {
+      ledgerStore.entry = { startedAt, value };
+    }
+    return value;
+  })();
+  ledgerStore.inflight = inflight;
+  try {
+    return await inflight;
+  } finally {
+    ledgerStore.inflight = null;
   }
+}
 
-  let inspect = inspectCache;
-  if (inspect === null || Date.now() - inspect.at > INSPECT_TTL || inspect.key !== inspectLimit) {
+async function getInspect(limit: number): Promise<ExtrasInspect> {
+  const cached = inspectStore.entry;
+  const startedAt = Date.now();
+  const sameKey = inspectStore.key === limit;
+  if (sameKey && cached !== null && startedAt - cached.startedAt <= INSPECT_TTL) return cached.value;
+  // Join an in-flight refresh for the same limit; a different limit refreshes in parallel.
+  if (
+    inspectStore.inflight !== null &&
+    (inspectStore.inflightKey === limit || inspectStore.key === limit)
+  ) {
+    return inspectStore.inflight;
+  }
+  inspectStore.inflightKey = limit;
+  const inflight = (async () => {
+    let value: ExtrasInspect;
     try {
-      const raw = await runHeadroomJson(["inspect", "--last", String(inspectLimit), "--format", "json"]);
+      const raw = await runHeadroomJson(["inspect", "--last", String(limit), "--format", "json"]);
       const list = Array.isArray(raw)
         ? raw
         : z.object({ requests: z.array(z.unknown()) }).parse(raw).requests;
-      const requests = (list as unknown[]).slice(0, inspectLimit).map((entry) => {
+      const requests = (list as unknown[]).slice(0, limit).map((entry) => {
         const flat: Record<string, string | number | boolean | null> = {};
         for (const [k, v] of Object.entries(z.record(z.string(), z.unknown()).parse(entry))) {
           if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null) {
@@ -302,17 +332,34 @@ export async function getHeadroomExtras({
         }
         return flat;
       });
-      inspect = { at: Date.now(), key: inspectLimit, value: { available: true, requests } };
+      value = { available: true, requests };
     } catch (error) {
       const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
-      inspect = {
-        at: Date.now(),
-        key: inspectLimit,
-        value: { available: false, hint: message },
-      };
+      value = { available: false, hint: message };
     }
-    inspectCache = inspect;
+    if (inspectStore.entry === null || inspectStore.entry.startedAt < startedAt) {
+      inspectStore.entry = { startedAt, value };
+      inspectStore.key = limit;
+      inspectStore.startedAt = startedAt;
+    }
+    return value;
+  })();
+  inspectStore.inflight = inflight;
+  try {
+    return await inflight;
+  } finally {
+    inspectStore.inflight = null;
   }
+}
 
-  return { ledger: ledger.value, inspect: inspect.value };
+export async function getHeadroomExtras({
+  inspectLimit = 8,
+}: {
+  inspectLimit?: number;
+}): Promise<{ ledger: ExtrasLedger; inspect: ExtrasInspect }> {
+  // Defense in depth: the RPC contract already constrains this, but the value
+  // is passed to a subprocess argv, so clamp at the call site too.
+  const limit = Math.min(50, Math.max(1, Math.round(inspectLimit)));
+  const [ledger, inspect] = await Promise.all([getLedger(), getInspect(limit)]);
+  return { ledger, inspect };
 }

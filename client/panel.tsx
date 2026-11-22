@@ -4,10 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { headroomExtras, headroomStats } from "../shared/headroom";
+import { headroomExtras, headroomStats, matchAgents, nearestSession } from "../shared/headroom";
 import type {
   HeadroomSession,
   HeadroomStats,
+  SessionAgent,
 } from "../shared/headroom";
 import type { PluginButtonContentProps } from "@getpaseo/plugin/client";
 
@@ -149,9 +150,12 @@ function SplitBar({
   );
 }
 
-type SessionAgent = { id: string; title: string | null; lastActivityAt: string };
-
-/** Subscribes to the host's agents; used to link ledger rows to openable conversations. */
+/**
+ * Rows are joined to openable agents by last-activity proximity via
+ * `matchAgents` (shared): an omp session's most recent proxy request and its
+ * agent's last turn land within minutes of each other. Unmatched rows stay
+ * plain session ids.
+ */
 function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): SessionAgent[] {
   const [agents, setAgents] = useState<SessionAgent[]>([]);
   useEffect(() => {
@@ -180,33 +184,6 @@ function useAgents(paseo: ReturnType<typeof usePaseo>, enabled: boolean): Sessio
     return () => ac.abort();
   }, [paseo, enabled]);
   return agents;
-}
-
-/**
- * Joins proxy ledger rows to Paseo agents by last-activity proximity: an omp
- * session's most recent proxy request and its agent's last turn land within
- * minutes of each other. Unmatched rows stay plain session ids.
- */
-function matchAgents(sessions: HeadroomSession[], agents: SessionAgent[]): Map<string, SessionAgent> {
-  const matches = new Map<string, SessionAgent>();
-  const usedAgents = new Set<string>();
-  for (const session of sessions) {
-    if (session.lastActivityAt === undefined) continue;
-    const sessionTime = new Date(session.lastActivityAt).getTime();
-    let best: { agent: SessionAgent; delta: number } | undefined;
-    for (const agent of agents) {
-      if (usedAgents.has(agent.id)) continue;
-      const delta = Math.abs(new Date(agent.lastActivityAt).getTime() - sessionTime);
-      if (delta < 20 * 60 * 1000 && (best === undefined || delta < best.delta)) {
-        best = { agent, delta };
-      }
-    }
-    if (best !== undefined) {
-      matches.set(session.id, best.agent);
-      usedAgents.add(best.agent.id);
-    }
-  }
-  return matches;
 }
 
 function SessionRow({
@@ -431,7 +408,7 @@ function SavingsSurface({
       section: { gap: 10 },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
     }),
-    [theme, c, s?.live],
+    [theme, c, s?.live, stale],
   );
 
   if (query.isPending) {
@@ -528,20 +505,31 @@ function SavingsSurface({
 
       {extras?.ledger !== undefined && (
         <View style={styles.grid}>
-          <StatCard
-            label="Saved today"
-            value={usd(extras.ledger.today?.costUsd)}
-            sub={`${compact(extras.ledger.today?.tokensSaved)} tokens · ${compact(extras.ledger.today?.calls)} calls`}
-            theme={theme}
-            compactLayout={c}
-          />
-          <StatCard
-            label="Saved lifetime"
-            value={usd(extras.ledger.lifetime?.costUsd)}
-            sub={`${compact(extras.ledger.lifetime?.tokensSaved)} tokens · ${compact(extras.ledger.lifetime?.calls)} calls`}
-            theme={theme}
-            compactLayout={c}
-          />
+          {extras.ledger.error !== undefined ? (
+            <Card theme={theme} compactLayout={c}>
+              <Micro theme={theme}>Saved today / lifetime</Micro>
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+                Ledger unavailable: {extras.ledger.error}
+              </Text>
+            </Card>
+          ) : (
+            <>
+              <StatCard
+                label="Saved today"
+                value={usd(extras.ledger.today?.costUsd)}
+                sub={`${compact(extras.ledger.today?.tokensSaved)} tokens · ${compact(extras.ledger.today?.calls)} calls`}
+                theme={theme}
+                compactLayout={c}
+              />
+              <StatCard
+                label="Saved lifetime"
+                value={usd(extras.ledger.lifetime?.costUsd)}
+                sub={`${compact(extras.ledger.lifetime?.tokensSaved)} tokens · ${compact(extras.ledger.lifetime?.calls)} calls`}
+                theme={theme}
+                compactLayout={c}
+              />
+            </>
+          )}
         </View>
       )}
 
@@ -683,6 +671,12 @@ function SavingsSurface({
         />
       )}
 
+      {extras?.inspect !== undefined && !extras.inspect.available && extras.inspect.hint !== undefined && (
+        <Text style={styles.muted} numberOfLines={2}>
+          Per-request diffs unavailable — {extras.inspect.hint}
+        </Text>
+      )}
+
       {extras?.inspect?.available === true &&
         extras.inspect.requests !== undefined &&
         extras.inspect.requests.length > 0 && (
@@ -727,6 +721,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
   const layout = props.layout;
   const agentId = isAgent ? props.agentId : undefined;
   const agent = useAgent(agentId ?? "", (a) => ({
+    id: a.id,
     cwd: a.cwd,
     title: a.title,
     updatedAt: a.updatedAt,
@@ -748,18 +743,17 @@ export function SessionPopover(props: PluginButtonContentProps) {
   const close = "close" in props ? props.close : undefined;
 
   // Same proximity join as the panel: the agent's last turn and its session's
-  // last proxy request land within minutes of each other.
+  // last proxy request land within minutes of each other. No time match means
+  // no Headroom activity is attributable to this session — never borrow one.
   const candidates = s?.workspaceSessions ?? [];
   const session =
     agent === undefined
-      ? candidates[0]
-      : candidates.reduce<{ row: HeadroomSession; delta: number } | undefined>((best, row) => {
-          if (row.lastActivityAt === undefined) return best;
-          const delta = Math.abs(new Date(row.lastActivityAt).getTime() - new Date(agent.updatedAt).getTime());
-          return delta < 20 * 60 * 1000 && (best === undefined || delta < best.delta)
-            ? { row, delta }
-            : best;
-        }, undefined)?.row ?? candidates[0];
+      ? undefined
+      : nearestSession(candidates, {
+          id: agent.id,
+          title: agent.title,
+          lastActivityAt: agent.updatedAt,
+        });
 
   const styles = useMemo(
     () => ({
@@ -795,7 +789,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
       },
       muted: { color: theme.colors.foregroundMuted, fontSize: 11 },
     }),
-    [theme, c, s?.live, agent],
+    [theme, c, s?.live, stale, agent],
   );
 
   if (agent === undefined || query.isPending) {
