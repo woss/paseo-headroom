@@ -57,20 +57,20 @@ function StatCard({
     <View
       style={{
         flex: 1,
-        gap: 3,
-        padding: compactLayout ? 10 : 14,
-        borderRadius: 12,
+        gap: 4,
+        padding: compactLayout ? 12 : 18,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.surface1,
       }}
     >
       <Micro theme={theme}>{label}</Micro>
-      <Text style={{ color: theme.colors.foreground, fontSize: compactLayout ? 15 : 17, fontWeight: "700" }}>
+      <Text style={{ color: theme.colors.foreground, fontSize: compactLayout ? 16 : 19, fontWeight: "700" }}>
         {value}
       </Text>
       {sub !== undefined && (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }} numberOfLines={1}>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }} numberOfLines={1}>
           {sub}
         </Text>
       )}
@@ -160,30 +160,30 @@ function SessionRow({
       }
       onPress={onPress}
       disabled={!linkable}
-      style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
     >
       <View style={{ width: 8, alignItems: "center" }}>
         {live && (
           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.colors.statusSuccess }} />
         )}
       </View>
-      <View style={{ flex: 1, gap: 1 }}>
+      <View style={{ flex: 1, gap: 2 }}>
         <Text
           numberOfLines={1}
           style={{
             color: linkable ? theme.colors.accent : theme.colors.foreground,
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: "600",
           }}
         >
           {agent?.title ?? session.id.slice(0, 8)}
           {linkable ? "  ↗" : ""}
         </Text>
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
           {session.id.slice(0, 8)} · {usd(session.costSaved)} · {ago(session.lastActivityAt)}
         </Text>
       </View>
-      <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+      <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
         {compact(session.tokensSaved)}
       </Text>
       <View
@@ -222,13 +222,13 @@ function SessionSection({
   if (sessions.length === 0) return null;
   const links = match ? matchAgents(sessions, agents) : new Map<string, SessionAgent>();
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 10 }}>
       <Micro theme={theme}>{label}</Micro>
       <View
         style={{
-          gap: compactLayout ? 10 : 12,
-          padding: compactLayout ? 10 : 14,
-          borderRadius: 12,
+          gap: compactLayout ? 12 : 16,
+          padding: compactLayout ? 12 : 18,
+          borderRadius: 14,
           borderWidth: 1,
           borderColor: theme.colors.border,
           backgroundColor: theme.colors.surface1,
@@ -237,7 +237,7 @@ function SessionSection({
         {sessions.map((session, i) => {
           const agent = links.get(session.id);
           return (
-            <View key={session.id} style={{ gap: compactLayout ? 10 : 12 }}>
+            <View key={session.id} style={{ gap: compactLayout ? 12 : 16 }}>
               {i > 0 && <View style={{ height: 1, backgroundColor: theme.colors.border }} />}
               <SessionRow
                 session={session}
@@ -280,11 +280,15 @@ function SavingsSurface({
 
   const styles = useMemo(
     () => ({
+      scroll: { flex: 1, backgroundColor: theme.colors.surface0 },
+      // Centered column: full-bleed cards on a wide window read as empty space.
       screen: {
-        flex: 1,
-        padding: c ? 16 : 24,
-        gap: c ? 14 : 20,
-        backgroundColor: theme.colors.surface0,
+        padding: c ? 16 : 32,
+        gap: c ? 14 : 24,
+        width: "100%" as const,
+        maxWidth: 880,
+        marginLeft: "auto" as const,
+        marginRight: "auto" as const,
       },
       header: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
       title: { color: theme.colors.foreground, fontSize: c ? 16 : 20, fontWeight: "700" as const },
@@ -296,43 +300,43 @@ function SavingsSurface({
         backgroundColor: s?.live ? theme.colors.statusSuccess : theme.colors.border,
       },
       hero: {
-        gap: c ? 10 : 14,
-        padding: c ? 14 : 18,
-        borderRadius: 12,
+        gap: c ? 10 : 16,
+        padding: c ? 14 : 24,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.surface1,
       },
       heroNumber: {
         color: theme.colors.foreground,
-        fontSize: c ? 38 : 52,
+        fontSize: c ? 38 : 56,
         fontWeight: "800" as const,
         letterSpacing: -1,
       },
       heroSub: { color: theme.colors.foregroundMuted, fontSize: c ? 12 : 14 },
       ratioTrack: {
-        height: 6,
-        borderRadius: 3,
+        height: 8,
+        borderRadius: 4,
         backgroundColor: theme.colors.surface2,
       },
       ratioFill: {
-        height: 6,
-        borderRadius: 3,
-        minWidth: 6,
+        height: 8,
+        borderRadius: 4,
+        minWidth: 8,
         backgroundColor: theme.colors.statusSuccess,
       },
-      eqRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6, flexWrap: "wrap" as const },
+      eqRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, flexWrap: "wrap" as const },
       eqPill: {
         borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 5,
         backgroundColor: theme.colors.surface2,
       },
       eqPillAccent: { backgroundColor: theme.colors.accent },
-      eqText: { color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600" as const },
+      eqText: { color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" as const },
       eqTextAccent: { color: theme.colors.accentForeground },
-      grid: { flexDirection: "row" as const, gap: 10 },
-      section: { gap: 8 },
+      grid: { flexDirection: "row" as const, gap: 12 },
+      section: { gap: 10 },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
     }),
     [theme, c, s?.live],
@@ -370,7 +374,7 @@ function SavingsSurface({
     : (s?.sessions ?? []);
 
   return (
-    <ScrollView style={styles.screen}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.screen}>
       <View style={styles.header}>
         <View style={styles.dot} />
         <Text style={styles.title}>Headroom</Text>
