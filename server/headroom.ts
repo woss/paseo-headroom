@@ -157,7 +157,7 @@ function ledgerSessions(
 
 export async function getHeadroomStats({ cwd }: { cwd?: string }): Promise<HeadroomStats> {
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 3000);
+  const timer = setTimeout(() => ac.abort(), 8000);
   try {
     const res = await fetch(`http://127.0.0.1:${port}/stats`, {
       signal: ac.signal,

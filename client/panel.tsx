@@ -1,7 +1,7 @@
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useAgent, usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { headroomExtras, headroomStats } from "../shared/headroom";
@@ -347,7 +347,14 @@ function SavingsSurface({
     queryFn: () => getStats({ cwd }),
     refetchInterval: 5000,
   });
-  const s: HeadroomStats | undefined = query.data;
+  const raw: HeadroomStats | undefined = query.data;
+  // Transient proxy hiccups (slow /stats, abort) shouldn't blank the panel:
+  // fall back to the last good snapshot and mark the dot stale.
+  const lastLive = useRef<HeadroomStats | undefined>(undefined);
+  if (raw?.live) lastLive.current = raw;
+  const stale = raw !== undefined && !raw.live && lastLive.current !== undefined;
+  // Downstream keeps the name `s`: while stale it is the last good snapshot.
+  const s = stale ? lastLive.current : raw;
   const getExtras = useRpc(headroomExtras);
   const extras = useQuery({
     queryKey: ["headroom-extras"],
@@ -378,7 +385,11 @@ function SavingsSurface({
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: s?.live ? theme.colors.statusSuccess : theme.colors.border,
+        backgroundColor: stale
+          ? theme.colors.statusWarning
+          : s?.live
+            ? theme.colors.statusSuccess
+            : theme.colors.border,
       },
       hero: {
         gap: c ? 10 : 16,
@@ -431,7 +442,7 @@ function SavingsSurface({
     );
   }
 
-  if (s && !s.live) {
+  if (raw !== undefined && !raw.live && lastLive.current === undefined) {
     return (
       <View style={styles.screen}>
         <View style={styles.header}>
@@ -727,7 +738,12 @@ export function SessionPopover(props: PluginButtonContentProps) {
     enabled: agent?.cwd !== undefined,
     refetchInterval: 3000,
   });
-  const s: HeadroomStats | undefined = query.data;
+  const raw: HeadroomStats | undefined = query.data;
+  const lastLive = useRef<HeadroomStats | undefined>(undefined);
+  if (raw?.live) lastLive.current = raw;
+  const stale = raw !== undefined && !raw.live && lastLive.current !== undefined;
+  // Same fallback as the panel: keep the last good snapshot while stale.
+  const s = stale ? lastLive.current : raw;
   const c = layout.compact;
   const close = "close" in props ? props.close : undefined;
 
@@ -760,7 +776,11 @@ export function SessionPopover(props: PluginButtonContentProps) {
         width: 7,
         height: 7,
         borderRadius: 4,
-        backgroundColor: s?.live ? theme.colors.statusSuccess : theme.colors.border,
+        backgroundColor: stale
+          ? theme.colors.statusWarning
+          : s?.live
+            ? theme.colors.statusSuccess
+            : theme.colors.border,
       },
       number: { color: theme.colors.foreground, fontSize: 30, fontWeight: "800" as const, letterSpacing: -0.5 },
       label: { color: theme.colors.foregroundMuted, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" },
@@ -786,7 +806,7 @@ export function SessionPopover(props: PluginButtonContentProps) {
     );
   }
 
-  if (s !== undefined && !s.live) {
+  if (raw !== undefined && !raw.live && lastLive.current === undefined) {
     return (
       <View style={styles.screen}>
         <View style={styles.header}>
