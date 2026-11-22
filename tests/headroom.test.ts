@@ -50,9 +50,8 @@ describe("nearestSession", () => {
 
 describe("pickWindow", () => {
   it("maps the CLI window shape and rejects malformed data", () => {
-    expect(pickWindow({ tokens_saved: 10, cost_usd: 0.5, calls: 2, savings_percent: 3 })).toEqual({
+    expect(pickWindow({ tokens_saved: 10, calls: 2, savings_percent: 3 })).toEqual({
       tokensSaved: 10,
-      costUsd: 0.5,
       calls: 2,
       savingsPct: 3,
     });

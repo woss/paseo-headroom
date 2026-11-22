@@ -264,9 +264,10 @@ async function getLedger(): Promise<ExtrasLedger> {
 async function getInspect(limit: number): Promise<ExtrasInspect> {
   const cached = inspectStore.entry;
   const startedAt = Date.now();
-  const sameKey = inspectStore.key === limit;
-  if (sameKey && cached !== null && startedAt - cached.startedAt <= INSPECT_TTL) return cached.value;
-  if (sameKey && inspectStore.inflight !== null) return inspectStore.inflight;
+  const fresh = cached !== null && startedAt - cached.startedAt <= INSPECT_TTL && inspectStore.key === limit;
+  if (fresh) return cached.value;
+  // Join an in-flight refresh for the same limit; a different limit refreshes in parallel.
+  if (inspectStore.inflight !== null && inspectStore.inflightKey === limit) return inspectStore.inflight;
   inspectStore.inflightKey = limit;
   const inflight = (async () => {
     let value: ExtrasInspect;
