@@ -353,14 +353,15 @@ function SavingsSurface({
   // meaningless across projects.
   const agents = useAgents(paseo, workspaceId !== undefined, workspaceId);
   // The workspace shows one agent conversation; its most recently active agent
-  // is the one on screen. Nearest ledger row = that agent's current session.
+  // is the one on screen. Nearest ledger row = that agent's current session —
+  // uncapped, so an idle-for-hours agent still resolves to its own session.
   const activeAgent = agents[0];
   const currentSession =
     workspaceId !== undefined &&
     activeAgent !== undefined &&
     s?.workspaceSessions !== undefined &&
     s.workspaceSessions.length > 0
-      ? nearestSession(s.workspaceSessions, activeAgent)
+      ? nearestSession(s.workspaceSessions, activeAgent, Number.POSITIVE_INFINITY)
       : undefined;
 
   const styles = useMemo(

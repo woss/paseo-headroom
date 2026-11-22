@@ -118,16 +118,18 @@ export function matchAgents(
   return matches;
 }
 
-/** The one session nearest in time to an agent's last turn, or undefined when unrelated. */
+/** The one session nearest in time to an agent's last turn. windowMs defaults
+ * to the 20-minute live window; pass Infinity for "nearest, no cap" (panel hero). */
 export function nearestSession(
   sessions: HeadroomSession[],
   agent: SessionAgent,
+  windowMs: number = MATCH_WINDOW_MS,
 ): HeadroomSession | undefined {
   let best: { row: HeadroomSession; delta: number } | undefined;
   for (const row of sessions) {
     if (row.lastActivityAt === undefined) continue;
     const delta = Math.abs(new Date(row.lastActivityAt).getTime() - new Date(agent.lastActivityAt).getTime());
-    if (delta <= MATCH_WINDOW_MS && (best === undefined || delta < best.delta)) {
+    if (delta <= windowMs && (best === undefined || delta < best.delta)) {
       best = { row, delta };
     }
   }
