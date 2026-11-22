@@ -31,6 +31,7 @@ export default function contribute(client: PluginClientContext) {
   const pills = new Map<string, PluginButtonRegistration>();
   const labels = new Map<string, string>();
   const agents = new Map<string, { cwd: string; title: string | null; updatedAt: string }>();
+  const missCount = new Map<string, number>();
   const lifetime = new AbortController();
 
   function registerPill(agent: {
@@ -42,8 +43,9 @@ export default function contribute(client: PluginClientContext) {
   }) {
     if (lifetime.signal.aborted || !agent.workspaceId || !agent.cwd || !agent.updatedAt) return;
     agents.set(agent.id, { cwd: agent.cwd, title: agent.title ?? null, updatedAt: agent.updatedAt });
-    const label = labels.get(agent.id) ?? "HR …";
-    pills.get(agent.id)?.remove();
+    // Register once; the poll owns visibility and label from here on, so agent
+    // upserts cannot flash the pill.
+    if (pills.has(agent.id)) return;
     pills.set(
       agent.id,
       client.addComposerPill({
@@ -53,7 +55,7 @@ export default function contribute(client: PluginClientContext) {
         button: {
           title: "Headroom savings",
           icon: "Gauge",
-          label,
+          label: labels.get(agent.id) ?? "HR …",
           behavior: { kind: "popover", Content: SessionPopover },
         },
       }),
@@ -76,6 +78,7 @@ export default function contribute(client: PluginClientContext) {
             pills.delete(update.agentId);
             labels.delete(update.agentId);
             agents.delete(update.agentId);
+            missCount.delete(update.agentId);
           }
         },
       });
@@ -83,7 +86,9 @@ export default function contribute(client: PluginClientContext) {
     })
     .catch(() => {});
 
-  // One stats RPC per distinct cwd per tick, shared by all agents on it.
+  // One stats RPC per distinct cwd per tick, shared by all agents on it. Two
+  // consecutive misses hide the pill (an agent whose traffic does not route
+  // through Headroom never matches and stays hidden).
   const poll = setInterval(() => {
     const byCwd = new Map<string, string[]>();
     for (const [agentId, info] of agents) {
@@ -101,10 +106,7 @@ export default function contribute(client: PluginClientContext) {
             if (!pill) continue;
             const info = agents.get(agentId);
             if (info === undefined) continue;
-            if (!s.live) {
-              pill.update({ visible: false });
-              continue;
-            }
+            if (!s.live) continue;
             // Proximity join against the agent's own last turn: no match means
             // no attributable session, so the pill hides instead of guessing.
             const session = nearestSession(s.workspaceSessions ?? [], {
@@ -113,9 +115,12 @@ export default function contribute(client: PluginClientContext) {
               lastActivityAt: info.updatedAt,
             });
             if (session === undefined) {
-              pill.update({ visible: false });
+              const misses = (missCount.get(agentId) ?? 0) + 1;
+              missCount.set(agentId, misses);
+              if (misses >= 2) pill.update({ visible: false });
               continue;
             }
+            missCount.delete(agentId);
             const label = `saved ${compact(session.tokensSaved)} · ${pct(session.savingsPct)}`;
             labels.set(agentId, label);
             pill.update({ visible: true, label });
