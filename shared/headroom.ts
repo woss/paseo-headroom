@@ -5,6 +5,7 @@ const sessionSchema = z.object({
   id: z.string(),
   requests: z.number().optional(),
   tokensSaved: z.number().optional(),
+  inputTokens: z.number().optional(),
   costSaved: z.number().optional(),
   inputCost: z.number().optional(),
   savingsPct: z.number().optional(),

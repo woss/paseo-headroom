@@ -94,6 +94,7 @@ const statsPayload = z.object({
             requests: z.number().optional(),
             tokens_saved: z.number().optional(),
             compression_savings_usd: z.number().optional(),
+            total_input_tokens: z.number().optional(),
             total_input_cost_usd: z.number().optional(),
             savings_percent: z.number().optional(),
             last_activity_at: z.string().optional(),
@@ -128,6 +129,7 @@ type LedgerRow = {
   requests?: number;
   tokens_saved?: number;
   compression_savings_usd?: number;
+  total_input_tokens?: number;
   total_input_cost_usd?: number;
   savings_percent?: number;
   last_activity_at?: string;
@@ -142,6 +144,7 @@ function ledgerSessions(
       id,
       requests: p.requests,
       tokensSaved: p.tokens_saved,
+      inputTokens: p.total_input_tokens,
       costSaved: p.compression_savings_usd,
       inputCost: p.total_input_cost_usd,
       savingsPct: p.savings_percent,

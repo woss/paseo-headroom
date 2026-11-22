@@ -1,11 +1,15 @@
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { useAgent, usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { headroomExtras, headroomStats } from "../shared/headroom";
-import type { HeadroomSession, HeadroomStats } from "../shared/headroom";
+import type {
+  HeadroomSession,
+  HeadroomStats,
+} from "../shared/headroom";
+import type { PluginButtonContentProps } from "@getpaseo/plugin/client";
 
 // One surface for both registrations: workspace panels and screens share theme + layout.
 type SurfaceProps = Pick<PluginScreenProps, "theme" | "layout">;
@@ -701,6 +705,158 @@ function SavingsSurface({
           </View>
         )}
     </ScrollView>
+  );
+}
+
+// Session popover: opens from the composer pill, scoped to that agent's session.
+export function SessionPopover(props: PluginButtonContentProps) {
+  // Registered per agent, so the host passes the agent context branch.
+  const isAgent = props.context === "agent";
+  const theme = props.theme;
+  const layout = props.layout;
+  const agentId = isAgent ? props.agentId : undefined;
+  const agent = useAgent(agentId ?? "", (a) => ({
+    cwd: a.cwd,
+    title: a.title,
+    updatedAt: a.updatedAt,
+  })) ?? undefined;
+  const getStats = useRpc(headroomStats);
+  const query = useQuery({
+    queryKey: ["headroom-session", agentId ?? "", agent?.cwd ?? ""],
+    queryFn: () => getStats({ cwd: agent?.cwd }),
+    enabled: agent?.cwd !== undefined,
+    refetchInterval: 3000,
+  });
+  const s: HeadroomStats | undefined = query.data;
+  const c = layout.compact;
+  const close = "close" in props ? props.close : undefined;
+
+  // Same proximity join as the panel: the agent's last turn and its session's
+  // last proxy request land within minutes of each other.
+  const candidates = s?.workspaceSessions ?? [];
+  const session =
+    agent === undefined
+      ? candidates[0]
+      : candidates.reduce<{ row: HeadroomSession; delta: number } | undefined>((best, row) => {
+          if (row.lastActivityAt === undefined) return best;
+          const delta = Math.abs(new Date(row.lastActivityAt).getTime() - new Date(agent.updatedAt).getTime());
+          return delta < 20 * 60 * 1000 && (best === undefined || delta < best.delta)
+            ? { row, delta }
+            : best;
+        }, undefined)?.row ?? candidates[0];
+
+  const styles = useMemo(
+    () => ({
+      screen: {
+        width: 280,
+        padding: c ? 12 : 16,
+        gap: c ? 10 : 14,
+        backgroundColor: theme.colors.surface0,
+      },
+      header: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
+      title: { color: theme.colors.foreground, fontSize: 14, fontWeight: "700" as const, flexShrink: 1 },
+      model: { color: theme.colors.foregroundMuted, fontSize: 11 },
+      dot: {
+        width: 7,
+        height: 7,
+        borderRadius: 4,
+        backgroundColor: s?.live ? theme.colors.statusSuccess : theme.colors.border,
+      },
+      number: { color: theme.colors.foreground, fontSize: 30, fontWeight: "800" as const, letterSpacing: -0.5 },
+      label: { color: theme.colors.foregroundMuted, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase" },
+      row: { flexDirection: "row" as const, justifyContent: "space-between" as const },
+      key: { color: theme.colors.foregroundMuted, fontSize: 12 },
+      value: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
+      box: {
+        gap: 8,
+        padding: c ? 10 : 12,
+        borderRadius: 10,
+        backgroundColor: theme.colors.surface1,
+      },
+      muted: { color: theme.colors.foregroundMuted, fontSize: 11 },
+    }),
+    [theme, c, s?.live, agent],
+  );
+
+  if (agent === undefined || query.isPending) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.muted}>Loading session…</Text>
+      </View>
+    );
+  }
+
+  if (s !== undefined && !s.live) {
+    return (
+      <View style={styles.screen}>
+        <View style={styles.header}>
+          <View style={styles.dot} />
+          <Text style={styles.title}>Proxy not reachable</Text>
+        </View>
+        <Text style={styles.muted}>{s.error}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={close}
+          style={{ paddingVertical: 6, borderRadius: 8, backgroundColor: theme.colors.surface1 }}
+        >
+          <Text style={{ color: theme.colors.foreground, fontSize: 12, textAlign: "center" }}>Close</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const savedPct =
+    session?.tokensSaved !== undefined && session.requests !== undefined
+      ? pct(session.savingsPct)
+      : undefined;
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.header}>
+        <View style={styles.dot} />
+        <Text style={styles.title} numberOfLines={1}>
+          {agent.title ?? session?.id.slice(0, 8)}
+        </Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={close}>
+          <Text style={styles.model}>close</Text>
+        </Pressable>
+      </View>
+
+      {session === undefined ? (
+        <Text style={styles.muted}>No Headroom activity recorded for this session yet.</Text>
+      ) : (
+        <>
+          <View style={{ gap: 2 }}>
+            <Micro theme={theme}>Session savings</Micro>
+            <Text style={styles.number}>{compact(session.tokensSaved)}</Text>
+            <Text style={styles.muted}>
+              {session.id.slice(0, 8)} · {savedPct ?? "—"} lighter · {ago(session.lastActivityAt)}
+            </Text>
+          </View>
+
+          <View style={styles.box}>
+            <View style={styles.row}>
+              <Text style={styles.key}>Requests</Text>
+              <Text style={styles.value}>{compact(session.requests)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Cost saved</Text>
+              <Text style={styles.value}>{usd(session.costSaved)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Full-price input</Text>
+              <Text style={styles.value}>
+                {session.inputCost !== undefined && session.inputCost > 0 ? usd(session.inputCost) : "—"}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Input tokens</Text>
+              <Text style={styles.value}>{compact(session.inputTokens)}</Text>
+            </View>
+          </View>
+        </>
+      )}
+    </View>
   );
 }
 

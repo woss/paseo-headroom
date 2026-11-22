@@ -1,6 +1,6 @@
 import type { PluginButtonRegistration, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
-import { compact, pct, SavingsPanel, SavingsScreen } from "./client/panel";
+import { compact, pct, SavingsPanel, SavingsScreen, SessionPopover } from "./client/panel";
 import { headroomStats } from "./shared/headroom";
 
 function SavingsItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
@@ -46,10 +46,7 @@ export default function contribute(client: PluginClientContext) {
           title: "Headroom savings",
           icon: "Gauge",
           label,
-          behavior: {
-            kind: "action",
-            onPress: () => client.openPanel("savings", { workspaceId: agent.workspaceId!, agentId: agent.id }),
-          },
+          behavior: { kind: "popover", Content: SessionPopover },
         },
       }),
     );
