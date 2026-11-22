@@ -176,7 +176,7 @@ function useAgents(
                   id: agent.id,
                   title: agent.title,
                   lastActivityAt: agent.updatedAt,
-                  workspaceId: agent.workspaceId,
+                  workspaceId: agent.workspaceId ?? "",
                 }))
                 .filter((a) => workspaceId === undefined || a.workspaceId === workspaceId)
                 .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)),
@@ -430,6 +430,12 @@ function SavingsSurface({
       row: { flexDirection: "row" as const, justifyContent: "space-between" as const },
       key: { color: theme.colors.foregroundMuted, fontSize: 12 },
       value: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
+      box: {
+        gap: 10,
+        padding: c ? 12 : 16,
+        borderRadius: 12,
+        backgroundColor: theme.colors.surface2,
+      },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
     }),
     [theme, c, s?.live, stale],
