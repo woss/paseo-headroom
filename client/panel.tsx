@@ -4,7 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { headroomExtras, headroomStats, matchAgents, nearestSession } from "../shared/headroom";
+import {
+  estimateUsd,
+  headroomExtras,
+  headroomStats,
+  INPUT_RATE_PER_1M,
+  matchAgents,
+  nearestSession,
+} from "../shared/headroom";
 import type {
   HeadroomSession,
   HeadroomStats,
@@ -204,6 +211,7 @@ function SessionRow({
   onPress?: () => void;
 }) {
   const linkable = agent !== undefined && onPress !== undefined;
+  const savedUsd = estimateUsd(session.tokensSaved);
   return (
     <Pressable
       accessibilityRole={linkable ? "button" : undefined}
@@ -250,6 +258,11 @@ function SessionRow({
           {pct(session.savingsPct)}
         </Text>
       </View>
+      {savedUsd !== undefined && (
+        <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "600" }}>
+          ${savedUsd.toFixed(2)}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -506,6 +519,22 @@ function SavingsSurface({
             </Text>
           </View>
           <View style={styles.box}>
+            <View style={styles.row}>
+              <Text style={styles.key}>Compression savings</Text>
+              <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "700" }}>
+                {estimateUsd(currentSession.tokensSaved) === undefined
+                  ? "—"
+                  : `$${estimateUsd(currentSession.tokensSaved)?.toFixed(2)}`}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Input at full rate</Text>
+              <Text style={styles.value}>
+                {currentSession.inputTokens !== undefined && currentSession.inputTokens > 0
+                  ? `$${estimateUsd(currentSession.inputTokens)?.toFixed(2)}`
+                  : "—"}
+              </Text>
+            </View>
             <View style={styles.row}>
               <Text style={styles.key}>Input tokens</Text>
               <Text style={styles.value}>{compact(currentSession.inputTokens)}</Text>
@@ -880,6 +909,22 @@ export function SessionPopover(props: PluginButtonContentProps) {
             <View style={styles.row}>
               <Text style={styles.key}>Input tokens</Text>
               <Text style={styles.value}>{compact(session.inputTokens)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Compression savings</Text>
+              <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "700" }}>
+                {estimateUsd(session.tokensSaved) === undefined
+                  ? "—"
+                  : `$${estimateUsd(session.tokensSaved)?.toFixed(2)}`}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.key}>Input at full rate</Text>
+              <Text style={styles.value}>
+                {session.inputTokens !== undefined && session.inputTokens > 0
+                  ? `$${estimateUsd(session.inputTokens)?.toFixed(2)}`
+                  : "—"}
+              </Text>
             </View>
           </View>
         </>

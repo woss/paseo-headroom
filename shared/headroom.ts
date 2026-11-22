@@ -80,6 +80,17 @@ export const headroomExtras = defineRpc({
 // minutes of each other; beyond this window a row is treated as unrelated.
 export const MATCH_WINDOW_MS = 20 * 60 * 1000;
 
+// Dollar figures are computed plugin-side from exact token counts, NOT from
+// the proxy's baked cost_usd (which prices glm-5.3-flash at ~$3/1M — 13-75x
+// the real opencode-zen rate). Source: models.dev, opencode-zen/glm-5.3-flash
+// input rate, verified 2026-11-22.
+export const INPUT_RATE_PER_1M = 0.15;
+
+export function estimateUsd(tokens: number | undefined): number | undefined {
+  if (tokens === undefined) return undefined;
+  return (tokens / 1e6) * INPUT_RATE_PER_1M;
+}
+
 export type SessionAgent = { id: string; title: string | null; lastActivityAt: string };
 
 /** Joins ledger rows to agents by last-activity proximity, nearest first, one agent per row. */
