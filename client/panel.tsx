@@ -295,7 +295,14 @@ function SavingsSurface({
         borderRadius: 4,
         backgroundColor: s?.live ? theme.colors.statusSuccess : theme.colors.border,
       },
-      hero: { gap: 2 },
+      hero: {
+        gap: c ? 10 : 14,
+        padding: c ? 14 : 18,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      },
       heroNumber: {
         color: theme.colors.foreground,
         fontSize: c ? 38 : 52,
@@ -303,6 +310,27 @@ function SavingsSurface({
         letterSpacing: -1,
       },
       heroSub: { color: theme.colors.foregroundMuted, fontSize: c ? 12 : 14 },
+      ratioTrack: {
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: theme.colors.surface2,
+      },
+      ratioFill: {
+        height: 6,
+        borderRadius: 3,
+        minWidth: 6,
+        backgroundColor: theme.colors.statusSuccess,
+      },
+      eqRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6, flexWrap: "wrap" as const },
+      eqPill: {
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: theme.colors.surface2,
+      },
+      eqPillAccent: { backgroundColor: theme.colors.accent },
+      eqText: { color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600" as const },
+      eqTextAccent: { color: theme.colors.accentForeground },
       grid: { flexDirection: "row" as const, gap: 10 },
       section: { gap: 8 },
       muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
@@ -350,11 +378,40 @@ function SavingsSurface({
       </View>
 
       <View style={styles.hero}>
-        <Micro theme={theme}>Tokens removed</Micro>
-        <Text style={styles.heroNumber}>{compact(s?.tokensSaved)}</Text>
-        <Text style={styles.heroSub}>
-          of {compact(s?.tokensBefore)} sent · {pct(savedPct)} lighter prompts
-        </Text>
+        <View style={{ gap: 2 }}>
+          <Micro theme={theme}>Tokens removed</Micro>
+          <Text style={styles.heroNumber}>{compact(s?.tokensSaved)}</Text>
+        </View>
+
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.ratioTrack}>
+              <View style={[styles.ratioFill, { width: `${Math.min(100, Math.max(0, savedPct ?? 0))}%` }]} />
+            </View>
+          </View>
+          <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "700" }}>
+            {pct(savedPct)}
+          </Text>
+        </View>
+
+        <View style={styles.eqRow}>
+          <View style={styles.eqPill}>
+            <Text style={styles.eqText}>{compact(s?.tokensBefore)} sent</Text>
+          </View>
+          <Text style={styles.eqText}>−</Text>
+          <View style={[styles.eqPill, styles.eqPillAccent]}>
+            <Text style={[styles.eqText, styles.eqTextAccent]}>{compact(s?.tokensSaved)} removed</Text>
+          </View>
+          <Text style={styles.eqText}>=</Text>
+          <View style={styles.eqPill}>
+            <Text style={styles.eqText}>
+              {s?.tokensBefore !== undefined && s.tokensSaved !== undefined
+                ? compact(s.tokensBefore - s.tokensSaved)
+                : "—"}{" "}
+              billed
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={{ gap: 10 }}>
