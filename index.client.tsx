@@ -18,7 +18,7 @@ export default function contribute(client: PluginClientContext) {
     id: "savings",
     title: "Headroom savings",
     icon: "Gauge",
-    locations: ["workspace"],
+    locations: ["workspace", "explorer"],
     Component: SavingsPanel,
   });
   client.addScreen({ id: "savings", title: "Headroom savings", Component: SavingsScreen });
