@@ -107,13 +107,14 @@ export default function contribute(client: PluginClientContext) {
             const info = agents.get(agentId);
             if (info === undefined) continue;
             if (!s.live) continue;
-            // Proximity join against the agent's own last turn: no match means
-            // no attributable session, so the pill hides instead of guessing.
-            const session = nearestSession(s.workspaceSessions ?? [], {
-              id: agentId,
-              title: info.title,
-              lastActivityAt: info.updatedAt,
-            });
+            // Proximity join against the agent's own last turn. The window is a
+            // full hour: a streaming turn keeps agent.updatedAt fresh while the
+            // session's last proxy request ages, so 20 minutes was too tight.
+            const session = nearestSession(
+              s.workspaceSessions ?? [],
+              { id: agentId, title: info.title, lastActivityAt: info.updatedAt },
+              60 * 60 * 1000,
+            );
             if (session === undefined) {
               const misses = (missCount.get(agentId) ?? 0) + 1;
               missCount.set(agentId, misses);
